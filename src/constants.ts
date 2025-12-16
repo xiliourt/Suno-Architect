@@ -791,9 +791,10 @@ You must output your response in exactly **5 separate code blocks** in the speci
    * Provide the full lyrics.
    * Embed Meta Tags within the lyrics using square brackets \`[]\` to dictate flow (e.g., \`[Beat Drop]\`, \`[Flow Switch]\`, \`[Guitar Solo]\`).
    * Ensure tags are placed *before* the relevant lyric block.
+   * Combine multiple sets of tags for more chaotic tracks, such as hyperpop.
    \`\`\`text
-   [Intro - Dark Atmosphere, Tense] [Male Vocal]
-   [Building Energy]
+   [Intro - Distorted Guitar Riff, Feedback] [Drums - Fast Tempo, Fill] [Spoken Word - Sassy, Clear Voice] 
+   [Pre-Chorus - Building Energy, Drum Roll]
    [Verse 1 - Aggressive, Punchy] [Male Vocal]
    [Pre Chorus - Confident, Articulate] [Female Vocal]
    ...
