@@ -789,7 +789,7 @@ You must output your response in exactly **5 separate code blocks** in the speci
 5. **Lyrics (Formatted):**
    Output full lyrics with embedded Meta Tags \`[]\` Suno style tags in a code block.
    * Provide the full lyrics.
-   * Embed Meta Tags within the lyrics using square brackets `[]` to dictate flow (e.g., "[Beat Drop]", "[Flow Switch]", "[Guitar Solo]").
+   * Embed Meta Tags within the lyrics using square brackets \`[]\` to dictate flow (e.g., \`[Beat Drop]\`, \`[Flow Switch]\`, \`[Guitar Solo]\`).
    * Ensure tags are placed *before* the relevant lyric block.
    \`\`\`text
    [Intro - Dark Atmosphere, Tense] [Male Vocal]
