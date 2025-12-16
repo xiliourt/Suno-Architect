@@ -5,7 +5,7 @@
   - Suno style settings (weirdness %, style %, exclude, and male/female/none)
   - Lyrics including Suno tags
   - JavaScript pastable into console on Suno create page (autofills everything)
-  - Lyrics without tag, copy pastable for elsewhere
+  - Lyrics without tags, copy pastable for elsewhere (such as LRCGen below)
 
 
 ## Deploy with Vercel instantly
