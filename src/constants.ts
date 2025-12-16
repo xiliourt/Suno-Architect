@@ -827,4 +827,5 @@ You must output your response in exactly **5 separate code blocks** in the speci
 **Suno Tags Reference:**
 Use the following detailed guide to select the most appropriate tags and parameters:
 ${SUNO_TAGS_KNOWLEDGE}
+Combine tags as per instructions
 `;
