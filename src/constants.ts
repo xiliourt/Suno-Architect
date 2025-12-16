@@ -133,15 +133,15 @@ Combining opposing tags for unique results:
 
 **Example A: Psychedelic Rock**
 * **Tags:** Psychedelic Rock, Progressive, Cinematic, Mysterious, Electric Guitar, Hammond Organ, Male Vocal, Reverb Heavy, Phaser, Solo Section.
-* **Settings:** Weirdness 60%, Style Influence 70%.
+* **Settings:** Weirdness 60%, Style Influence 65%.
 
 **Example B: Modern EDM**
 * **Tags:** Progressive House, Energetic, Driving, Synthesizer, Sidechain Compression, Female Vocals, Vocal Chops, Drop, Build-up.
-* **Settings:** Weirdness 40%, Style Influence 80%, Exclude: Acoustic, Slow.
+* **Settings:** Weirdness 40%, Style Influence 70%, Exclude: Acoustic, Slow.
 
 **Example C: Indie Folk**
 * **Tags:** Indie Folk, Acoustic Guitar, Fingerpicking, Raw Production, Room Reverb, Intimate, Male Vocal, Soft.
-* **Settings:** Weirdness 30%, Style Influence 60%, Exclude: Electronic, Synthesizer.
+* **Settings:** Weirdness 30%, Style Influence 50%, Exclude: Electronic, Synthesizer.
 `;
 
 export const SUNO_SYSTEM_INSTRUCTION = `
