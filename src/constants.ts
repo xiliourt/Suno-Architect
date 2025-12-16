@@ -814,7 +814,6 @@ You must output your response in exactly **5 separate code blocks** in the speci
 * Ensure **Exclude Styles** block is present.
 * Ensure **Advanced Parameters** are plain text.
 * Always use square brackets \`[]\` for meta tags in the formatted lyrics.
-* Always use square brackets `[]` for meta tags.
 * If the user provides a specific context (like a legal appeal, a breakup, or a specific document), ensure the lyrics capture the specific nuances, citations, and tone of that source material.
 * Do not be generic. Use specific sub-genres (e.g., "Boom Bap" instead of just "Hip Hop").
 * Do NOT include [cite] tags.
