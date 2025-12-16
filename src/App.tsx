@@ -29,11 +29,11 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#0f172a] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-800 via-[#0f172a] to-black text-slate-200 font-sans selection:bg-purple-500/30">
+    <div className="min-h-screen flex flex-col bg-[#0f172a] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-800 via-[#0f172a] to-black text-slate-200 font-sans selection:bg-purple-500/30">
       
       <Header onKeyUpdate={setCustomApiKey} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
           {/* Left Column: Input */}
           <div className="lg:col-span-5 space-y-6">
@@ -100,6 +100,21 @@ const App: React.FC = () => {
           </div>
         </div>
       </main>
+
+      {/* Footer */}
+      <footer className="w-full py-6 text-center border-t border-slate-800 bg-slate-900/50 backdrop-blur-sm">
+        <p className="text-slate-500 text-sm">
+          Open Source Project. View source on{' '}
+          <a 
+            href="https://github.com/xiliourt/Suno-Architect/" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="text-purple-400 hover:text-purple-300 hover:underline transition-colors font-medium"
+          >
+            GitHub
+          </a>
+        </p>
+      </footer>
     </div>
   );
 };
