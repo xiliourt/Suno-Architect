@@ -94,14 +94,14 @@ Direct parameter overriding meta tags.
 ### Weirdness (Creativity/Temperature)
 Controls the randomness and deviation from standard genre norms.
 * **0-30% (Safe):** Predictable, radio-friendly, adheres strictly to genre conventions. Good for commercial pop or covers.
-* **40-60% (Balanced):** Standard creativity. Recommended default.
-* **70-100% (Chaos):** Experimental, avant-garde, unusual structures, unexpected fusions. Good for IDM, Glitch, or finding new sounds.
+* **35-50% (Balanced):** Standard creativity. Recommended default.
+* **55-85% (Chaos):** Experimental, avant-garde, unusual structures, unexpected fusions. Good for IDM, Glitch, or finding new sounds.
 
 ### Style Influence (Token Weight)
 Controls how strictly the AI adheres to the provided tags vs. its own training intuition.
 * **0-30% (Loose):** Tags are suggestions. High hallucination/creative freedom.
-* **40-60% (Balanced):** Recommended default.
-* **70-100% (Strict):** Forces specific adherence to complex tag combinations. Required when specifying exact sub-genres or complex instrumentation (e.g., "Djent, 7/8 time, Polyrhythm").
+* **45-65% (Balanced):** Recommended default.
+* **75-85% (Strict):** Forces specific adherence to complex tag combinations. Required when specifying exact sub-genres or complex instrumentation (e.g., "Djent, 7/8 time, Polyrhythm").
 
 ---
 
