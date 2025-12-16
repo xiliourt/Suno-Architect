@@ -2,7 +2,7 @@
 - Uses Gemini Flash 2.5 (which supports free keys, see [https://aistudio.google.com/api-keys](https://aistudio.google.com/api-keys))
 - Generates
   - Song title
-  - Suno style settings (weirdness %%, style %, exclude, and male/female/none)
+  - Suno style settings (weirdness %, style %, exclude, and male/female/none)
   - Lyrics including Suno tags
   - JavaScript pastable into console on Suno create page (autofills everything)
   - Lyrics without tag, copy pastable for elsewhere
