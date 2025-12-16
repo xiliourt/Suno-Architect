@@ -3,7 +3,7 @@
 - Generates
   - Song title
   - Suno style settings (weirdness %, style %, exclude, and male/female/none)
-  - Lyrics including Suno tags
+  - Lyrics including Suno style tags
   - JavaScript pastable into console on Suno create page (autofills everything)
   - Lyrics without tags, copy pastable for elsewhere (such as LRCGen below)
 
