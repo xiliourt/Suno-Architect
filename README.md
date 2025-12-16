@@ -11,7 +11,8 @@
 ## Deploy with Vercel instantly
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fxiliourt%2FSuno-Architect%2F)
 
-Reequires a gemini key, which can be set in the UI client side.
+Requires a gemini key, which can be set in the UI client side. see [https://aistudio.google.com/api-keys](https://aistudio.google.com/api-keys)
+- Ensure not to enable billing / to only use a 'free plan' key (it has enough usage for all this).
 
 ## Other Projects
 - [Lyrical Sync](https://github.com/xiliourt/Lyrical-Sync/): A web music player supporting synced lrc files.
