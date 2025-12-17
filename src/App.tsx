@@ -4,6 +4,7 @@ import OutputSection from './components/OutputSection';
 import { Header } from './components/Header';
 import { generateSunoPrompt } from './services/geminiService';
 import { GenerationState } from './types';
+import Footer from './components/Footer';
 
 const App: React.FC = () => {
   const [state, setState] = useState<GenerationState>({
@@ -100,21 +101,7 @@ const App: React.FC = () => {
           </div>
         </div>
       </main>
-
-      {/* Footer */}
-      <footer className="w-full py-6 text-center border-t border-slate-800 bg-slate-900/50 backdrop-blur-sm">
-        <p className="text-slate-500 text-sm">
-          Open Source Project. View source on{' '}
-          <a 
-            href="https://github.com/xiliourt/Suno-Architect/" 
-            target="_blank" 
-            rel="noopener noreferrer" 
-            className="text-purple-400 hover:text-purple-300 hover:underline transition-colors font-medium"
-          >
-            GitHub
-          </a>
-        </p>
-      </footer>
+      <Footer />
     </div>
   );
 };
