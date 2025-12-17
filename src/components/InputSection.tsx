@@ -80,7 +80,7 @@ const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiK
                         </div>
                         <h3 className="text-white font-bold mb-1">API Key Required</h3>
                         <p className="text-slate-400 text-xs mb-3 leading-relaxed">
-                            You need a Gemini API key to generate songs. It's free and easy to get.
+                            You need a Gemini API key to generate songs. It's free and easy to get. Enter it via the button at the top-right corner.
                         </p>
                         <a 
                             href="https://aistudio.google.com/app/apikey" 
