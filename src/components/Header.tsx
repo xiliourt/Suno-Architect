@@ -2,9 +2,10 @@ import React, { useEffect, useState } from 'react';
 
 interface HeaderProps {
   onKeyUpdate: (key: string) => void;
+  onValidationChange: (isValid: boolean) => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onKeyUpdate }) => {
+export const Header: React.FC<HeaderProps> = ({ onKeyUpdate, onValidationChange }) => {
   const [hasKey, setHasKey] = useState(false);
   const [isAiStudio, setIsAiStudio] = useState(false);
   const [showKeyInput, setShowKeyInput] = useState(false);
@@ -13,29 +14,43 @@ export const Header: React.FC<HeaderProps> = ({ onKeyUpdate }) => {
   useEffect(() => {
     const checkEnv = async () => {
       const aistudio = (window as any).aistudio;
-      // Check if we are in the AI Studio environment
+      let isValid = false;
+      let keyToSet = '';
+
+      // 1. Check AI Studio
       if (aistudio && typeof aistudio.hasSelectedApiKey === 'function') {
         try {
           const has = await aistudio.hasSelectedApiKey();
-          setIsAiStudio(true);
-          setHasKey(has);
+          if (has) {
+            isValid = true;
+            setIsAiStudio(true);
+          }
         } catch (e) {
-          console.warn("AI Studio key check failed, falling back to manual mode", e);
-          setIsAiStudio(false);
-        }
-      } else {
-        setIsAiStudio(false);
-        // Check local storage for manual key
-        const stored = localStorage.getItem('gemini_api_key');
-        if (stored) {
-            setHasKey(true);
-            setManualKey(stored);
-            onKeyUpdate(stored);
+          console.warn("AI Studio key check failed", e);
         }
       }
+
+      // 2. Check Local Storage if not AI Studio
+      if (!isValid) {
+        setIsAiStudio(false);
+        const stored = localStorage.getItem('gemini_api_key');
+        if (stored) {
+            isValid = true;
+            setManualKey(stored);
+            keyToSet = stored;
+        } else if (process.env.API_KEY) {
+            // 3. Check Environment Variable
+            isValid = true;
+        }
+      }
+
+      setHasKey(isValid);
+      onKeyUpdate(keyToSet);
+      onValidationChange(isValid);
     };
+    
     checkEnv();
-  }, [onKeyUpdate]);
+  }, [onKeyUpdate, onValidationChange]);
 
   const handleAction = async () => {
     if (isAiStudio) {
@@ -45,6 +60,7 @@ export const Header: React.FC<HeaderProps> = ({ onKeyUpdate }) => {
           await aistudio.openSelectKey();
           const has = await aistudio.hasSelectedApiKey();
           setHasKey(has);
+          onValidationChange(has);
         } catch (e) {
           console.error("AI Studio key selection failed", e);
         }
@@ -55,15 +71,21 @@ export const Header: React.FC<HeaderProps> = ({ onKeyUpdate }) => {
   };
 
   const saveManualKey = () => {
-    if (manualKey.trim()) {
-        localStorage.setItem('gemini_api_key', manualKey.trim());
+    const trimmed = manualKey.trim();
+    if (trimmed) {
+        localStorage.setItem('gemini_api_key', trimmed);
         setHasKey(true);
         setShowKeyInput(false);
-        onKeyUpdate(manualKey.trim());
+        onKeyUpdate(trimmed);
+        onValidationChange(true);
     } else {
         localStorage.removeItem('gemini_api_key');
-        setHasKey(false);
+        
+        // If we remove the manual key, we check if env var exists to fallback
+        const hasEnv = !!process.env.API_KEY;
+        setHasKey(hasEnv);
         onKeyUpdate('');
+        onValidationChange(hasEnv);
     }
   };
 
