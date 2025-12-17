@@ -4,7 +4,7 @@ const Footer = () => {
       <p className="text-slate-500 text-sm">
         Open Source Project. View source on{' '}
         <a 
-          href="https://github.com/xiliourt/Lyrical-Sync" 
+          href="https://github.com/xiliourt/Suno-Architect/" 
           target="_blank" 
           rel="noopener noreferrer" 
           className="text-purple-400 hover:text-purple-300 hover:underline transition-colors font-medium"
@@ -15,5 +15,3 @@ const Footer = () => {
     </footer>
   );
 };
-
-export default Footer;
