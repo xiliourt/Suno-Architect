@@ -101,7 +101,7 @@ const App: React.FC = () => {
           </div>
         </div>
       </main>
-      <Footer />
+      <Footer git="https://github.com/xiliourt/Suno-Architect/" />
     </div>
   );
 };
