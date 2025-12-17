@@ -14,6 +14,7 @@ const App: React.FC = () => {
   });
 
   const [customApiKey, setCustomApiKey] = useState('');
+  const [isKeyValid, setIsKeyValid] = useState(false);
 
   const handleGenerate = async (prompt: string) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null, result: null }));
@@ -32,7 +33,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col bg-[#0f172a] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-800 via-[#0f172a] to-black text-slate-200 font-sans selection:bg-purple-500/30">
       
-      <Header onKeyUpdate={setCustomApiKey} />
+      <Header onKeyUpdate={setCustomApiKey} onValidationChange={setIsKeyValid} />
 
       <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
@@ -46,7 +47,11 @@ const App: React.FC = () => {
                     Includes meta tags, song structure, and production directives.
                   </p>
                </div>
-              <InputSection onGenerate={handleGenerate} isLoading={state.isLoading} />
+              <InputSection 
+                onGenerate={handleGenerate} 
+                isLoading={state.isLoading} 
+                apiKeyValid={isKeyValid} 
+              />
               
               {state.error && (
                 <div className="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 text-sm">
