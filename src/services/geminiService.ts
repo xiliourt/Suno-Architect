@@ -55,14 +55,19 @@ export const groupLyricsByLines = async (
 
   const ai = new GoogleGenAI({ apiKey });
   
-  // We need to keep the payload reasonably small.
-  // We'll strip some data from alignedWords to save tokens, just sending word and timestamps.
-  const simplifiedWords = alignedWords.map(w => ({ w: w.word, s: w.start_s, e: w.end_s }));
+  // SANITIZATION & OPTIMIZATION:
+  // 1. Trim words to remove excess whitespace.
+  // 2. Round timestamps to 2 decimal places to significantly reduce token count.
+  // 3. This simplified structure helps the model process much faster.
+  const simplifiedWords = alignedWords.map(w => ({ 
+      w: w.word.trim(), 
+      s: Number(w.start_s.toFixed(2)), 
+      e: Number(w.end_s.toFixed(2)) 
+  }));
 
   const prompt = `
-  I have a list of time-aligned words from a song and the original lyrics text.
-  Please group the aligned words into lines that correspond to the structure of the original lyrics.
-  
+  Task: Group the provided JSON aligned words into lines that match the visual structure of the Original Lyrics.
+
   Original Lyrics:
   """
   ${lyrics}
@@ -71,17 +76,25 @@ export const groupLyricsByLines = async (
   Aligned Words (JSON):
   ${JSON.stringify(simplifiedWords)}
   
-  Return a JSON Object with a single key "lines" which is an array of arrays of the aligned word objects.
-  Preserve the timestamps exactly.
-  If a word from the aligned list doesn't fit clearly, include it in the nearest line.
-  Structure: { "lines": [[{ "w": "...", "s": 1.2, "e": 1.5 }, ...], ...] }
+  Instructions:
+  1. Return a JSON Object with a single key "lines".
+  2. "lines" must be an array of arrays (one array per lyric line).
+  3. Place the aligned word objects into the correct line arrays.
+  4. Preserve the exact "w", "s", "e" values.
+  5. Do not invent words. Use the provided list.
+  
+  Expected Output Format: 
+  { "lines": [[{ "w": "Hello", "s": 1.01, "e": 1.50 }, ...], ...] }
   `;
 
   try {
       const response = await ai.models.generateContent({
           model: "gemini-2.5-flash", // Fast model, good for JSON tasks
           contents: prompt,
-          config: { responseMimeType: "application/json" }
+          config: { 
+              responseMimeType: "application/json",
+              temperature: 0.1 // Lower temperature for more deterministic/structural tasks
+          }
       });
       
       const text = response.text || "{}";
