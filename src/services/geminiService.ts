@@ -87,11 +87,13 @@ const parseResponse = (fullText: string): ParsedSunoOutput => {
   if (matches.length > 4) result.lyricsAlone = matches[4];
 
   // Extract Advanced Parameters (Plain text looking for specific keys)
+  // We use a cleaner that removes Markdown list characters (*, -) and leading whitespace, 
+  // but preserves the end of the line (e.g. 50% or (Tenor))
   const paramLines = fullText.split('\n').filter(line => 
     line.toLowerCase().includes('vocal gender') || 
     line.toLowerCase().includes('weirdness') || 
     line.toLowerCase().includes('style influence')
-  ).map(line => line.replace(/^\W+|\W+$/g, '').trim()); // Clean bullets
+  ).map(line => line.replace(/^[\s\*\-\u2022]+/, '').trim());
 
   if (paramLines.length > 0) {
     result.advancedParams = paramLines.join('\n');
