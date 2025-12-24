@@ -79,13 +79,14 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
   /**
    * Helper: Remove [Meta Tags] and empty lines from text to get clean lyrics.
+   * Completely removes [] blocks including content.
    */
   const stripMetaTags = (text: string): string => {
       if (!text) return "";
       return text
-          .replace(/\[.*?\]/g, '') // Remove [Verse], [Chorus]
-          .replace(/\(.*?\)/g, '') // Remove (Ad-libs)
-          .replace(/\{.*?\}/g, '') // Remove {Tags}
+          .replace(/\[[\s\S]*?\]/g, '') // Remove [Verse], [Chorus] and contents completely, including multiline
+          .replace(/\([\s\S]*?\)/g, '') // Remove (Ad-libs)
+          .replace(/\{[\s\S]*?\}/g, '') // Remove {Tags}
           .split('\n')
           .map(line => line.trim())
           .filter(line => line.length > 0)
