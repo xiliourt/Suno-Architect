@@ -45,7 +45,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       if (!text) return "";
       return text
           .replace(/\[.*?\]/g, '') // Remove [Verse], [Chorus]
-          .replace(/\(.*?\)/g, '') // Remove (Ad-libs) - Optional, but keeps lines cleaner
+          .replace(/\(.*?\)/g, '') // Remove (Ad-libs)
+          .replace(/\{.*?\}/g, '') // Remove {Tags}
           .split('\n')
           .map(line => line.trim())
           .filter(line => line.length > 0)
@@ -61,6 +62,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       const cleanText = stripMetaTags(textLyrics);
       const textLines = cleanText.split('\n');
       
+      // Filter out any aligned words that look like meta tags
+      const cleanAligned = aligned.filter(w => {
+          const val = w.word.trim();
+          // Filter [Tag] or (Adlib) if they appeared in audio alignment
+          return !((val.startsWith('[') && val.endsWith(']')) || (val.startsWith('(') && val.endsWith(')')));
+      });
+      
       const groups: AlignedWord[][] = [];
       let wordIdx = 0;
 
@@ -75,16 +83,16 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           
           // Consume N words from the aligned stream
           for (let i = 0; i < wordsInLine; i++) {
-              if (wordIdx >= aligned.length) break;
-              matchedWords.push(aligned[wordIdx]);
+              if (wordIdx >= cleanAligned.length) break;
+              matchedWords.push(cleanAligned[wordIdx]);
               wordIdx++;
           }
           if (matchedWords.length > 0) groups.push(matchedWords);
       }
       
-      // Dump remaining words into chunks if the text lyrics were shorter than audio lyrics
-      if (wordIdx < aligned.length) {
-          const remainder = aligned.slice(wordIdx);
+      // Dump remaining words into chunks
+      if (wordIdx < cleanAligned.length) {
+          const remainder = cleanAligned.slice(wordIdx);
           const chunkSize = 6;
           for (let i = 0; i < remainder.length; i += chunkSize) {
               groups.push(remainder.slice(i, i + chunkSize));
@@ -105,6 +113,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         setClipData(fromHistory);
         
         // Determine the best source of lyrics
+        // We STRIP tags from prompt if we use it fallback
         const rawLyrics = fromHistory.originalData?.lyricsAlone || fromHistory.metadata?.prompt || "";
         
         if (fromHistory.alignmentData) {
@@ -212,10 +221,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           ctx.textBaseline = 'middle';
           
           // Improved Active Line Logic
-          // Priority: 
-          // 1. Line strictly active (time within start/end)
-          // 2. Immediate next line (if in gap)
-          
           let activeLineIdx = lines.findIndex(line => {
              if (line.length === 0) return false;
              const start = line[0].start_s;
@@ -225,13 +230,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
           // Fallback: If in a gap, show the NEXT upcoming line
           if (activeLineIdx === -1) {
-              // Find first line that starts after current time
               const upcomingIdx = lines.findIndex(line => line.length > 0 && line[0].start_s > time);
-              
               if (upcomingIdx !== -1) {
                   activeLineIdx = upcomingIdx;
               } else {
-                  // Past the end of all lines, show the last one
                   activeLineIdx = lines.length - 1;
               }
           }
@@ -241,11 +243,11 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
              const line = lines[lineIdx];
              const centerY = (height / 2) + offsetY;
              
-             // Dynamic Font Scaling to fit line length
+             // Dynamic Font Scaling
              let fontSize = 48 * scale;
              ctx.font = `bold ${fontSize}px Inter, sans-serif`;
              
-             // First Pass: Measure total width
+             // Measure
              let totalWidth = 0;
              const measurements = line.map(w => {
                  const m = ctx.measureText(w.word + " ");
@@ -259,7 +261,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                  const ratio = maxW / totalWidth;
                  fontSize *= ratio;
                  ctx.font = `bold ${fontSize}px Inter, sans-serif`;
-                 // Re-measure with new font size
                  totalWidth = 0;
                  measurements.forEach((_, i) => {
                      const m = ctx.measureText(line[i].word + " ");
@@ -270,25 +271,24 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
              
              let currentX = (width - totalWidth) / 2;
 
-             // Second Pass: Draw words
              line.forEach((w, i) => {
                  const isWordActive = time >= w.start_s && time <= w.end_s;
                  const isWordPast = time > w.end_s;
                  
                  if (lineIdx === activeLineIdx) {
                     if (isWordActive) {
-                        ctx.fillStyle = '#e879f9'; // Bright Pink/Purple for active word
-                        ctx.shadowColor = '#d946ef'; // Strong glow
+                        ctx.fillStyle = '#e879f9'; 
+                        ctx.shadowColor = '#d946ef'; 
                         ctx.shadowBlur = 25;
                     } else if (isWordPast) {
-                        ctx.fillStyle = '#f1f5f9'; // White/Slate (sung)
+                        ctx.fillStyle = '#f1f5f9'; 
                         ctx.shadowBlur = 0;
                     } else {
-                        ctx.fillStyle = 'rgba(255,255,255,0.3)'; // Dim (future)
+                        ctx.fillStyle = 'rgba(255,255,255,0.3)'; 
                         ctx.shadowBlur = 0;
                     }
                  } else {
-                     ctx.fillStyle = `rgba(255,255,255,${alpha})`; // Inactive line
+                     ctx.fillStyle = `rgba(255,255,255,${alpha})`;
                      ctx.shadowBlur = 0;
                  }
                  
@@ -296,36 +296,33 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                  ctx.fillText(w.word, currentX, centerY);
                  currentX += measurements[i];
              });
-             
-             // Reset Shadow
              ctx.shadowBlur = 0;
           };
 
-          // Render Active Line (Center)
+          // Render Lines
           renderLine(activeLineIdx, 0, 1.2, 1);
-          
-          // Render Previous Lines (fading up/out)
           renderLine(activeLineIdx - 1, -80, 0.8, 0.5);
           renderLine(activeLineIdx - 2, -140, 0.6, 0.2);
-          
-          // Render Next Lines (fading down/in)
           renderLine(activeLineIdx + 1, 80, 0.8, 0.5);
           renderLine(activeLineIdx + 2, 140, 0.6, 0.2);
 
       } else if (alignment) {
-          // Fallback to Teleprompter view
+          // Fallback Teleprompter View
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           
-          const activeIndex = alignment.findIndex(w => time >= w.start_s && time <= w.end_s);
-          const upcomingIndex = alignment.findIndex(w => w.start_s > time);
+          // Filter tags in this view as well
+          const cleanAligned = alignment.filter(w => !/^\[.*\]$/.test(w.word.trim()));
+
+          const activeIndex = cleanAligned.findIndex(w => time >= w.start_s && time <= w.end_s);
+          const upcomingIndex = cleanAligned.findIndex(w => w.start_s > time);
           
-          let baseIndex = activeIndex !== -1 ? activeIndex : (upcomingIndex !== -1 ? upcomingIndex : alignment.length - 1);
+          let baseIndex = activeIndex !== -1 ? activeIndex : (upcomingIndex !== -1 ? upcomingIndex : cleanAligned.length - 1);
           if (baseIndex < 0) baseIndex = 0;
 
           const startWindow = Math.max(0, baseIndex - 1);
-          const endWindow = Math.min(alignment.length, baseIndex + 3);
-          const wordsToShow = alignment.slice(startWindow, endWindow);
+          const endWindow = Math.min(cleanAligned.length, baseIndex + 3);
+          const wordsToShow = cleanAligned.slice(startWindow, endWindow);
           const startY = (height / 2) + 50;
           const lineHeight = 60;
 
