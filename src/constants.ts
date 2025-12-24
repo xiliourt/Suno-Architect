@@ -99,8 +99,8 @@ Output exactly **5 separate code blocks** in order.
 3. **Exclude Styles:** (Comma-separated or "None")
 4. **Advanced Parameters:** (Plain text bullets)
    * Vocal Gender: [Male|Female|None]
-   * Weirdness: [0-100]% (Reference: 30% for Folk, 60% for Psychedelic)
-   * Style Influence: [0-100]% (Reference: 50% for Loose, 85% for Strict)
+   * Weirdness: [0-100]% (Reference: 30% for Folk, 60% for Psychedelic. Output as a numerical value (ie 40))
+   * Style Influence: [0-100]% (Reference: 50% for Loose, 85% for Strict. Output as a numerical value (ie 65))
 5. **Lyrics (Formatted):** (Lyrics with \`[]\` tags)
 6. **Lyrics (Clean):** (Raw lyrics ONLY)
 
