@@ -80,7 +80,7 @@ export const triggerSunoGeneration = async (
   }
 
   // Use the proxy endpoint to avoid CORS issues and manage headers
-  const API_ENDPOINT = "https://dev.suno-architect.pages.dev/api/suno-proxy";
+  const API_ENDPOINT = "/api/suno-proxy";
   
   // Normalize 0-100 to 0.0-1.0
   const weirdness = typeof data.weirdness === 'number' ? data.weirdness / 100 : 0.5;
