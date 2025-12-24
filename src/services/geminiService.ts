@@ -44,85 +44,148 @@ export const generateSunoPrompt = async (
 
 /**
  * Groups aligned words into lines matching the original lyrics structure using Gemini.
- * Uses a hybrid approach: takes JavaScript-generated pseudo-lines as a draft and perfects it.
+ * Uses a hybrid approach: takes JavaScript-generated pseudo-lines as a draft, 
+ * batches them to avoid token limits/timeouts, and uses AI to perfect the structure.
  */
 export const groupLyricsByLines = async (
   lyrics: string,
   alignedWords: AlignedWord[],
   customApiKey?: string,
   modelName: string = "gemini-3-flash-preview",
-  pseudoLines?: AlignedWord[][] // New optional parameter
+  pseudoLines?: AlignedWord[][]
 ): Promise<AlignedWord[][]> => {
   const apiKey = customApiKey || process.env.API_KEY;
   if (!apiKey) throw new Error("API Key required for smart grouping.");
 
-  const ai = new GoogleGenAI({ apiKey });
-  
-  // SANITIZATION & OPTIMIZATION:
-  // 1. Trim words to remove excess whitespace.
-  // 2. Round timestamps to 2 decimal places to significantly reduce token count.
-  const simplifiedWords = alignedWords.map(w => ({ 
+  // 1. Prepare Data
+  // Round timestamps to 2 decimal places to significantly reduce token count.
+  const allSimplifiedWords = alignedWords.map(w => ({ 
       w: w.word.trim(), 
       s: Number(w.start_s.toFixed(2)), 
       e: Number(w.end_s.toFixed(2)) 
   }));
 
-  // Create a simplified representation of the pseudo-lines if they exist
-  // This acts as a "Draft" for the AI to correct, rather than starting from scratch
-  const draftRepresentation = pseudoLines ? pseudoLines.map(line => 
-      line.map(w => ({ w: w.word.trim(), s: Number(w.start_s.toFixed(2)), e: Number(w.end_s.toFixed(2)) }))
-  ) : [];
+  // If no pseudoLines provided, treat the whole list as one big line to start (fallback)
+  // But ideally, VisualizerSection should always pass pseudoLines.
+  const inputLines = pseudoLines && pseudoLines.length > 0 ? pseudoLines : [alignedWords];
 
-  const prompt = `
+  // 2. Batching Strategy
+  // We cannot send 500+ words in one JSON prompt efficiently (latency/complexity).
+  // We group pseudo-lines into batches of ~75 words.
+  const BATCH_WORD_LIMIT = 75;
+  const batches: any[][] = [];
+  
+  let currentBatch: any[] = [];
+  let currentWordCount = 0;
+
+  for (const line of inputLines) {
+      // Simplify the line structure for the prompt
+      const simplifiedLine = line.map(w => ({ 
+          w: w.word.trim(), 
+          s: Number(w.start_s.toFixed(2)), 
+          e: Number(w.end_s.toFixed(2)) 
+      }));
+
+      // If adding this line exceeds limit, push current batch and start new
+      if (currentWordCount + simplifiedLine.length > BATCH_WORD_LIMIT && currentBatch.length > 0) {
+          batches.push(currentBatch);
+          currentBatch = [];
+          currentWordCount = 0;
+      }
+      
+      currentBatch.push(simplifiedLine);
+      currentWordCount += simplifiedLine.length;
+  }
+  if (currentBatch.length > 0) batches.push(currentBatch);
+
+  // 3. Process Batches Sequentially (to avoid rate limits and ensure order)
+  const finalLines: AlignedWord[][] = [];
+
+  for (let i = 0; i < batches.length; i++) {
+      const batchDraft = batches[i]; // Array of arrays (lines)
+      
+      try {
+          const batchResult = await processBatchWithGemini(batchDraft, lyrics, apiKey, modelName);
+          finalLines.push(...batchResult);
+      } catch (err) {
+          console.error(`Batch ${i+1} failed, falling back to original draft for this section.`, err);
+          // Fallback: convert the simplified batch draft back to full AlignedWord structure
+          // We need to map back to the original objects in alignedWords to preserve exact precision if needed,
+          // but reconstruction is fine for visualizer.
+          const fallbackLines = batchDraft.map(line => line.map((s: any) => ({
+              word: s.w,
+              start_s: s.s,
+              end_s: s.e,
+              success: true,
+              p_align: 1
+          })));
+          finalLines.push(...fallbackLines);
+      }
+  }
+
+  return finalLines;
+};
+
+/**
+ * Helper to process a single batch of words.
+ */
+const processBatchWithGemini = async (
+    batchDraft: any[][], // Array of lines, where each line is array of {w,s,e}
+    fullLyrics: string,
+    apiKey: string,
+    modelName: string
+): Promise<AlignedWord[][]> => {
+    const ai = new GoogleGenAI({ apiKey });
+
+    // Flatten batch for the "Draft" view, but keep structure in mind
+    const flatWords = batchDraft.flat();
+
+    const prompt = `
   Role: Lyric Synchronizer.
-  Task: The user has a "Draft Grouping" of audio events based on timing (silence gaps). Your job is to REFACTOR this draft to match the "Visual Guide" (Official Lyrics).
+  Task: You are correcting the line breaks for a SPECIFIC SEGMENT (Batch) of a song.
   
-  --- Visual Guide (The Target Structure) ---
-  ${lyrics}
-  --- End Visual Guide ---
+  --- Full Song Lyrics (Context Only - Do not output all of this) ---
+  ${fullLyrics.substring(0, 3000)} ... [Truncated]
+  --- End Context ---
   
-  --- Draft Grouping (Based on Audio Pauses) ---
-  ${JSON.stringify(draftRepresentation.length > 0 ? draftRepresentation : simplifiedWords)}
-  --- End Draft ---
+  --- Current Audio Segment (Draft Grouping) ---
+  ${JSON.stringify(batchDraft)}
+  --- End Segment ---
   
   Instructions:
-  1. The "Draft Grouping" contains the correct words and timestamps but usually has incorrect line breaks (splitting lines too early or merging them).
-  2. You must output a JSON object containing the words grouped strictly according to the "Visual Guide".
-  3. You MUST use the specific word objects (w, s, e) provided in the Draft. Do not invent timestamps.
-  4. If the visual guide has 4 lines, your output must have 4 arrays (unless the audio repeats a section).
-  5. If the audio repeats a chorus that is written only once in the text, write it out multiple times in your output to match the audio events.
+  1. This "Audio Segment" is a small part of the song.
+  2. The "Draft Grouping" has correct words/times but potentially wrong line breaks.
+  3. Refactor the words in the Segment into lines that match the style of the Full Song Lyrics.
+  4. **CRITICAL:** You MUST output EVERY word from the "Current Audio Segment". Do not skip words. Do not add words.
+  5. Output JSON only.
   
   Output JSON format:
   { "lines": [[{"w": "word", "s": 1.2, "e": 1.5}, ...], ...] }
   `;
 
-  try {
-      const response = await ai.models.generateContent({
-          model: modelName, 
-          contents: prompt,
-          config: { 
-              responseMimeType: "application/json",
-              temperature: 0.1 // Low temp for structural precision
-          }
-      });
-      
-      const text = response.text || "{}";
-      const json = JSON.parse(text);
-      if (json.lines && Array.isArray(json.lines)) {
-          // Map back to full AlignedWord shape
-          return json.lines.map((line: any[]) => line.map((w: any) => ({
-              word: w.w,
-              start_s: w.s,
-              end_s: w.e,
-              success: true,
-              p_align: 1
-          })));
-      }
-      return [];
-  } catch (e) {
-      console.error("Failed to parse grouping response", e);
-      return [];
-  }
+    const response = await ai.models.generateContent({
+        model: modelName, 
+        contents: prompt,
+        config: { 
+            responseMimeType: "application/json",
+            temperature: 0.1 
+        }
+    });
+
+    const text = response.text || "{}";
+    const json = JSON.parse(text);
+
+    if (json.lines && Array.isArray(json.lines)) {
+        return json.lines.map((line: any[]) => line.map((w: any) => ({
+            word: w.w,
+            start_s: w.s,
+            end_s: w.e,
+            success: true,
+            p_align: 1
+        })));
+    }
+    
+    throw new Error("Invalid JSON structure from AI");
 };
 
 /**
