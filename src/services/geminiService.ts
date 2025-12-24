@@ -83,8 +83,9 @@ export const groupLyricsByLines = async (
   2. Maintain the exact sequence of the Stream. Do not reorder words.
   3. Group the words into an array of arrays, where each inner array is a line of text.
   4. Use the "Original Lyrics" as the primary guide for where to break lines.
-  5. If the audio (Stream) repeats sections (like a chorus repeated twice) which are only written once in the text, you must output the lines multiple times to match the Stream.
-  6. If the audio contains ad-libs not in the text, append them to the nearest logical line or create a new line if significant.
+  5. If the "Original Lyrics" are unformatted (no line breaks), infer the structure based on natural phrasing and rhymes.
+  6. If the audio (Stream) repeats sections (like a chorus repeated twice) which are only written once in the text, you must output the lines multiple times to match the Stream.
+  7. If the audio contains ad-libs not in the text, append them to the nearest logical line or create a new line if significant.
   
   Output JSON format:
   { "lines": [[{"w": "word", "s": 1.2, "e": 1.5}, ...], ...] }
