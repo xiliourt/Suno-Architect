@@ -1,4 +1,4 @@
-name = "suno-architect2"
+name = "suno-architect"
 main = "functions/_worker.ts"
 compatibility_date = "2024-11-01"
 
