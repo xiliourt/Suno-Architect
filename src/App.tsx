@@ -50,6 +50,7 @@ const App: React.FC = () => {
   const [sunoCookie, setSunoCookie] = useState('');
   const [sunoModel, setSunoModel] = useState('chirp-bluejay'); // Default to V4.5+
   const [sunoCredits, setSunoCredits] = useState<number | null>(null);
+  const [isSyncingHistory, setIsSyncingHistory] = useState(false);
 
   // Prompt Settings State
   const [promptSettings, setPromptSettings] = useState<PromptSettings>(() => {
@@ -186,6 +187,89 @@ const App: React.FC = () => {
         }
     } catch (e) {
         console.error("Failed to fetch history feed", e);
+    }
+  };
+
+  const handleRefreshHistory = async () => {
+    if (!sunoCookie) {
+         alert("Please connect your Suno account in Settings first.");
+         return;
+    }
+    setIsSyncingHistory(true);
+    try {
+        const feedData = await getSunoFeed(sunoCookie);
+        if (feedData && Array.isArray(feedData.clips)) {
+            // Map new clips
+            const newClips: SunoClip[] = feedData.clips.map((clip: any) => {
+                const metadata = clip.metadata || {};
+                const tags = metadata.tags || '';
+                const prompt = metadata.prompt || '';
+                const title = clip.title || 'Untitled';
+                
+                const originalData: ParsedSunoOutput = {
+                    style: tags,
+                    title: title,
+                    excludeStyles: metadata.negative_tags || '',
+                    advancedParams: '', 
+                    vocalGender: '', 
+                    weirdness: metadata.control_sliders?.weirdness_constraint ? Math.round(metadata.control_sliders.weirdness_constraint * 100) : 50,
+                    styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
+                    lyricsWithTags: prompt,
+                    lyricsAlone: prompt,
+                    javascriptCode: '',
+                    fullResponse: ''
+                };
+
+                return {
+                    id: clip.id,
+                    title: title,
+                    created_at: clip.created_at,
+                    model_name: clip.model_name || 'unknown',
+                    imageUrl: clip.image_url,
+                    imageLargeUrl: clip.image_large_url,
+                    metadata: {
+                        tags: tags,
+                        prompt: prompt
+                    },
+                    originalData: originalData
+                };
+            });
+
+            setHistory(prev => {
+                // 1. Remove Drafts
+                const nonDrafts = prev.filter(p => !p.id.startsWith('draft_'));
+                const map = new Map(nonDrafts.map(c => [c.id, c]));
+
+                // 2. Merge New Clips (preserving local rich data)
+                newClips.forEach(newClip => {
+                    if (map.has(newClip.id)) {
+                         const existing = map.get(newClip.id)!;
+                         // Check if existing item has "Rich" data (fullResponse present)
+                         const isRich = !!existing.originalData?.fullResponse;
+                         
+                         map.set(newClip.id, {
+                             ...newClip,
+                             originalData: isRich ? existing.originalData : newClip.originalData,
+                             metadata: isRich ? existing.metadata : newClip.metadata,
+                             // Preserve local enhancements
+                             alignmentData: existing.alignmentData || newClip.alignmentData,
+                             lrcContent: existing.lrcContent || newClip.lrcContent,
+                             srtContent: existing.srtContent || newClip.srtContent,
+                         });
+                    } else {
+                        map.set(newClip.id, newClip);
+                    }
+                });
+
+                return Array.from(map.values()).sort((a, b) => 
+                    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                );
+            });
+        }
+    } catch(e) {
+        console.error("Sync failed", e);
+    } finally {
+        setIsSyncingHistory(false);
     }
   };
 
@@ -420,6 +504,8 @@ const App: React.FC = () => {
                 history={history} 
                 onUpdateClip={handleUpdateClip} 
                 sunoCookie={sunoCookie} // Pass the cookie
+                onResync={handleRefreshHistory}
+                isSyncing={isSyncingHistory}
             />
         )}
       </main>
