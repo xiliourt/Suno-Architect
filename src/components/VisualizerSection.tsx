@@ -31,7 +31,7 @@ interface VisualizerSectionProps {
   sunoCookie?: string;
   onUpdateClip: (id: string, updates: Partial<SunoClip>) => void;
   apiKey?: string;
-  geminiModel?: string; // Add this prop
+  geminiModel?: string;
 }
 
 const ASPECT_RATIOS = {
@@ -95,11 +95,85 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   };
 
   /**
-   * Robust grouping based on timing gaps and character count.
-   * This creates the "Pseudo-lines" for the AI.
-   * 
-   * UPDATED: Using tighter thresholds to favor over-splitting (smaller chunks)
-   * which are easier for AI to merge than under-splitting.
+   * Algorithm: Match Aligned Words to Prompt Structure.
+   * This uses the original lyrics (prompt) as the source of truth for line breaks.
+   */
+  const matchWordsToPrompt = (aligned: AlignedWord[], promptText: string): AlignedWord[][] => {
+      const cleanAligned = aligned.filter(w => !isMetaWord(w.word));
+      if (cleanAligned.length === 0) return [];
+
+      const promptLines = stripMetaTags(promptText)
+          .split('\n')
+          .map(l => l.trim())
+          .filter(l => l.length > 0);
+      
+      if (promptLines.length === 0) return groupWordsByTiming(cleanAligned);
+
+      // 1. Tokenize the prompt into a flat list, but remember which line index each token belongs to.
+      // We normalize text for matching (lowercase, no punctuation).
+      type PromptToken = { text: string; lineIndex: number };
+      const tokens: PromptToken[] = [];
+      
+      promptLines.forEach((line, idx) => {
+          const words = line.toLowerCase().replace(/[^\w\s]|_/g, "").split(/\s+/).filter(w => w);
+          words.forEach(w => tokens.push({ text: w, lineIndex: idx }));
+      });
+
+      const groups: AlignedWord[][] = [];
+      let currentGroup: AlignedWord[] = [];
+      let currentLineIndex = 0;
+      let tokenPtr = 0;
+
+      for (let i = 0; i < cleanAligned.length; i++) {
+          const wordObj = cleanAligned[i];
+          const cleanWord = wordObj.word.toLowerCase().replace(/[^\w\s]|_/g, "");
+
+          if (!cleanWord) {
+              // If word is just punctuation, just add it to current group
+              currentGroup.push(wordObj);
+              continue;
+          }
+
+          // Try to match with current or next few tokens
+          // (Simple greedy lookahead to handle skipped words/ad-libs)
+          let matchFound = false;
+          let lookahead = 0;
+          const MAX_LOOKAHEAD = 3;
+
+          while (tokenPtr + lookahead < tokens.length && lookahead < MAX_LOOKAHEAD) {
+              const target = tokens[tokenPtr + lookahead];
+              
+              // Fuzzy match: exact or contains
+              if (target.text === cleanWord || target.text.includes(cleanWord) || cleanWord.includes(target.text)) {
+                  
+                  // FOUND MATCH
+                  // Check if this token belongs to a NEW line
+                  if (target.lineIndex > currentLineIndex) {
+                      // Push current group and start new one
+                      if (currentGroup.length > 0) groups.push(currentGroup);
+                      currentGroup = [];
+                      currentLineIndex = target.lineIndex;
+                  }
+
+                  // Advance main token pointer past this match
+                  tokenPtr += lookahead + 1;
+                  matchFound = true;
+                  break; 
+              }
+              lookahead++;
+          }
+
+          // Always add the word to the current group (whether matched or ad-lib/mismatch)
+          currentGroup.push(wordObj);
+      }
+
+      if (currentGroup.length > 0) groups.push(currentGroup);
+      
+      return groups;
+  };
+
+  /**
+   * Robust grouping based on timing gaps (Fallback).
    */
   const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
       const cleanAligned = aligned.filter(w => !isMetaWord(w.word));
@@ -108,8 +182,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       const groups: AlignedWord[][] = [];
       let currentLine: AlignedWord[] = [];
       
-      const GAP_THRESHOLD = 0.5;  // Reduced from 0.65 to capture tighter pauses
-      const MAX_CHARS = 40;       // Reduced from 45 to break long lines earlier
+      const GAP_THRESHOLD = 0.5;
+      const MAX_CHARS = 40; 
 
       cleanAligned.forEach((word, idx) => {
           if (idx === 0) {
@@ -120,15 +194,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           const prevWord = cleanAligned[idx - 1];
           const timeGap = word.start_s - prevWord.end_s;
           
-          // Calculate current line length (approx)
           const currentLen = currentLine.reduce((sum, w) => sum + w.word.length + 1, 0);
 
           const isGapBig = timeGap > GAP_THRESHOLD;
           const isLineLong = currentLen > MAX_CHARS;
-          // Check for punctuation at end of previous word (if present in data)
           const endsClause = /[.,;!?]$/.test(prevWord.word);
 
-          // Force break if gap is big, OR if line is long/punctuated AND there is at least a small gap
           if (isGapBig || ((isLineLong || endsClause) && timeGap > 0.15)) {
               groups.push(currentLine);
               currentLine = [word];
@@ -173,9 +244,17 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         
         if (fromHistory.alignmentData) {
             setAlignment(fromHistory.alignmentData);
-            // Use time-based grouping by default for accuracy
-            const autoLines = groupWordsByTiming(fromHistory.alignmentData);
+            
+            // INITIAL DEFAULT: Try to use prompt if available, else timing
+            const rawLyrics = fromHistory.originalData?.lyricsAlone || fromHistory.metadata?.prompt || "";
+            let autoLines;
+            if (rawLyrics) {
+                autoLines = matchWordsToPrompt(fromHistory.alignmentData, rawLyrics);
+            } else {
+                autoLines = groupWordsByTiming(fromHistory.alignmentData);
+            }
             setLines(autoLines);
+
         } else if (sunoCookie && !fromHistory.id.startsWith('draft_')) {
              setIsPreparing(true);
              getLyricAlignment(fromHistory.id, sunoCookie)
@@ -183,7 +262,15 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                     if(res && res.aligned_words) {
                         setAlignment(res.aligned_words);
                         onUpdateClip(fromHistory.id, { alignmentData: res.aligned_words });
-                        const autoLines = groupWordsByTiming(res.aligned_words);
+                        
+                        // Try prompt match first
+                        const rawLyrics = fromHistory.originalData?.lyricsAlone || fromHistory.metadata?.prompt || "";
+                        let autoLines;
+                        if(rawLyrics) {
+                             autoLines = matchWordsToPrompt(res.aligned_words, rawLyrics);
+                        } else {
+                             autoLines = groupWordsByTiming(res.aligned_words);
+                        }
                         setLines(autoLines);
                     }
                 })
@@ -250,8 +337,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       try {
           const cleanAligned = alignment.filter(w => !isMetaWord(w.word));
           
-          // 1. JS Heuristics: Generate "Pseudo-lines" based on timing first
-          const pseudoLines = groupWordsByTiming(cleanAligned);
+          // 1. JS Heuristics: Generate "Pseudo-lines" based on PROMPT STRUCTURE first
+          // This ensures the visualizer looks correct immediately based on the prompt's line breaks.
+          const pseudoLines = matchWordsToPrompt(cleanAligned, cleanLyrics);
           
           // Show JS preview immediately while AI thinks
           setLines(pseudoLines);
@@ -262,13 +350,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           if (grouped && grouped.length > 0) {
               setLines(grouped);
           } else {
-             // Already showing pseudoLines, just warn in console
-             console.warn("AI couldn't group the lines. Keeping simple timing.");
+             console.warn("AI couldn't group the lines. Keeping prompt-based structure.");
           }
       } catch (e) {
           console.error(e);
           // Alert user but they still have the JS lines visible
-          alert("Failed to group lines with AI. Kept timing-based grouping.");
+          alert("Failed to group lines with AI. Kept prompt-based grouping.");
       } finally {
           setIsGrouping(false);
       }
