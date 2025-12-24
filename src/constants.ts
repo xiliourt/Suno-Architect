@@ -198,11 +198,8 @@ You must output your response in exactly **5 separate code blocks** in the speci
 
 6. **Lyrics (Clean):**
    Output lyrics ONLY (no style tags) in a code block. 
-   Keep (intro), (Verse), (Chorus), (Prechorus) and (Outro) tags.
+   No (intro), (Verse), (Chorus), (Prechorus) and (Outro) tags; just the raw lyrics.
    \`\`\`text
-   (intro)
-   (Verse 1)
-   (Chorus)
    ...
    \`\`\`
 
