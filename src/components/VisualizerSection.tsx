@@ -96,6 +96,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
   /**
    * Robust grouping based on timing gaps and character count.
+   * This creates the "Pseudo-lines" for the AI.
    */
   const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
       const cleanAligned = aligned.filter(w => !isMetaWord(w.word));
@@ -245,12 +246,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       setIsGrouping(true);
       try {
           const cleanAligned = alignment.filter(w => !isMetaWord(w.word));
-          // Pass the geminiModel prop to the service
-          const grouped = await groupLyricsByLines(cleanLyrics, cleanAligned, apiKey, geminiModel);
+          
+          // 1. JS Heuristics: Generate "Pseudo-lines" based on timing first
+          const pseudoLines = groupWordsByTiming(cleanAligned);
+
+          // 2. Gemini Refinement: Pass pseudo-lines as a hint to the AI
+          const grouped = await groupLyricsByLines(cleanLyrics, cleanAligned, apiKey, geminiModel, pseudoLines);
+          
           if (grouped && grouped.length > 0) {
               setLines(grouped);
           } else {
-              alert("AI couldn't group the lines. Try editing the lyrics first.");
+              alert("AI couldn't group the lines. Falling back to simple timing.");
+              setLines(pseudoLines);
           }
       } catch (e) {
           console.error(e);
