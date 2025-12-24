@@ -3,14 +3,13 @@ import InputSection from './components/InputSection';
 import OutputSection from './components/OutputSection';
 import { Header } from './components/Header';
 import { generateSunoPrompt } from './services/geminiService';
-import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings } from './types';
+import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings, ViewMode } from './types';
 import { DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS, buildKnowledgeBase, GET_PROMPT_V1 } from './constants';
 import Footer from './components/Footer';
 import SunoSettingsModal from './components/SunoSettingsModal';
 import { getSunoCredits, updateSunoMetadata, getSunoFeed } from './services/sunoApi';
 import HistorySection from './components/HistorySection';
-
-type ViewMode = 'generator' | 'history';
+import VisualizerSection from './components/VisualizerSection';
 
 const App: React.FC = () => {
   const [state, setState] = useState<GenerationState>({
@@ -368,6 +367,103 @@ const App: React.FC = () => {
     setHistory(prev => prev.map(clip => clip.id === id ? { ...clip, ...updates } : clip));
   };
 
+  // Helper to render content based on view
+  const renderContent = () => {
+      switch(view) {
+          case 'history':
+              return (
+                <HistorySection 
+                    history={history} 
+                    onUpdateClip={handleUpdateClip} 
+                    sunoCookie={sunoCookie}
+                    onResync={handleRefreshHistory}
+                    isSyncing={isSyncingHistory}
+                />
+              );
+          case 'visualizer':
+              return (
+                  <VisualizerSection 
+                    history={history}
+                    sunoCookie={sunoCookie}
+                    onUpdateClip={handleUpdateClip}
+                    apiKey={customApiKey}
+                  />
+              );
+          case 'generator':
+          default:
+              return (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <div className="lg:col-span-5 space-y-6">
+                        <div className="sticky top-24">
+                        <div className="mb-6">
+                            <h2 className="text-3xl font-bold text-white mb-2">Create Professional Songs</h2>
+                            <p className="text-slate-400 text-sm leading-relaxed">
+                                Transform your raw ideas into structured, high-quality prompts optimized for Suno AI & Udio. 
+                                Includes meta tags, song structure, and production directives.
+                            </p>
+                        </div>
+                        <InputSection 
+                            onGenerate={handleGenerate} 
+                            isLoading={state.isLoading} 
+                            apiKeyValid={isKeyValid} 
+                        />
+                        {state.error && (
+                            <div className="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 text-sm">
+                            <strong>Error:</strong> {state.error}
+                            </div>
+                        )}
+                        <div className="mt-8 p-5 bg-slate-900/50 rounded-xl border border-slate-800">
+                            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Pro Tips</h3>
+                            <ul className="space-y-2 text-sm text-slate-400">
+                            <li className="flex items-start">
+                                <span className="text-purple-500 mr-2">•</span> Be specific about the genre (e.g., "Darkwave" vs "Electronic").
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-purple-500 mr-2">•</span> Mention vocal gender and mood.
+                            </li>
+                            <li className="flex items-start">
+                                <span className="text-purple-500 mr-2">•</span> Paste specific text/stories for the AI to rewrite.
+                            </li>
+                            </ul>
+                        </div>
+                        </div>
+                    </div>
+                    <div className="lg:col-span-7">
+                        {state.result ? (
+                        <OutputSection 
+                            data={state.result} 
+                            sunoCookie={sunoCookie}
+                            sunoModel={sunoModel}
+                            onSyncSuccess={handleSyncSuccess}
+                        />
+                        ) : (
+                        <div className="h-full flex flex-col items-center justify-center p-12 text-center border-2 border-dashed border-slate-800 rounded-2xl bg-slate-900/20 text-slate-600 min-h-[400px]">
+                            {!state.isLoading && (
+                            <>
+                                <div className="w-16 h-16 rounded-full bg-slate-800 mb-4 flex items-center justify-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 opacity-50">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
+                                </svg>
+                                </div>
+                                <p className="text-lg font-medium">Ready to Generate</p>
+                                <p className="text-sm mt-1">Your structured song prompts will appear here.</p>
+                            </>
+                            )}
+                            {state.isLoading && (
+                            <div className="flex flex-col items-center animate-pulse">
+                                <div className="h-4 w-3/4 bg-slate-800 rounded mb-3"></div>
+                                <div className="h-4 w-1/2 bg-slate-800 rounded mb-3"></div>
+                                <div className="h-32 w-full bg-slate-800 rounded"></div>
+                            </div>
+                            )}
+                        </div>
+                        )}
+                    </div>
+                </div>
+              );
+      }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#0f172a] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-800 via-[#0f172a] to-black text-slate-200 font-sans selection:bg-purple-500/30">
       
@@ -420,94 +516,26 @@ const App: React.FC = () => {
                     </span>
                 )}
              </button>
+             <button
+                onClick={() => setView('visualizer')}
+                className={`px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${
+                    view === 'visualizer' 
+                    ? 'bg-slate-700 text-white shadow-lg' 
+                    : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                }`}
+             >
+                 {/* Video Camera Icon */}
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                    <path d="M23 7l-7 5 7 5V7z" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                </svg>
+                <span>Visualizer</span>
+             </button>
           </div>
       </div>
 
       <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-        {view === 'generator' ? (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            {/* Left Column: Input */}
-            <div className="lg:col-span-5 space-y-6">
-                <div className="sticky top-24">
-                <div className="mb-6">
-                    <h2 className="text-3xl font-bold text-white mb-2">Create Professional Songs</h2>
-                    <p className="text-slate-400 text-sm leading-relaxed">
-                        Transform your raw ideas into structured, high-quality prompts optimized for Suno AI & Udio. 
-                        Includes meta tags, song structure, and production directives.
-                    </p>
-                </div>
-                <InputSection 
-                    onGenerate={handleGenerate} 
-                    isLoading={state.isLoading} 
-                    apiKeyValid={isKeyValid} 
-                />
-                
-                {state.error && (
-                    <div className="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 text-sm">
-                    <strong>Error:</strong> {state.error}
-                    </div>
-                )}
-
-                {/* Tips Section */}
-                <div className="mt-8 p-5 bg-slate-900/50 rounded-xl border border-slate-800">
-                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Pro Tips</h3>
-                    <ul className="space-y-2 text-sm text-slate-400">
-                    <li className="flex items-start">
-                        <span className="text-purple-500 mr-2">•</span> Be specific about the genre (e.g., "Darkwave" vs "Electronic").
-                    </li>
-                    <li className="flex items-start">
-                        <span className="text-purple-500 mr-2">•</span> Mention vocal gender and mood.
-                    </li>
-                    <li className="flex items-start">
-                        <span className="text-purple-500 mr-2">•</span> Paste specific text/stories for the AI to rewrite.
-                    </li>
-                    </ul>
-                </div>
-                </div>
-            </div>
-
-            {/* Right Column: Output */}
-            <div className="lg:col-span-7">
-                {state.result ? (
-                <OutputSection 
-                    data={state.result} 
-                    sunoCookie={sunoCookie}
-                    sunoModel={sunoModel}
-                    onSyncSuccess={handleSyncSuccess}
-                />
-                ) : (
-                <div className="h-full flex flex-col items-center justify-center p-12 text-center border-2 border-dashed border-slate-800 rounded-2xl bg-slate-900/20 text-slate-600 min-h-[400px]">
-                    {!state.isLoading && (
-                    <>
-                        <div className="w-16 h-16 rounded-full bg-slate-800 mb-4 flex items-center justify-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 opacity-50">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
-                        </svg>
-                        </div>
-                        <p className="text-lg font-medium">Ready to Generate</p>
-                        <p className="text-sm mt-1">Your structured song prompts will appear here.</p>
-                    </>
-                    )}
-                    {state.isLoading && (
-                    <div className="flex flex-col items-center animate-pulse">
-                        <div className="h-4 w-3/4 bg-slate-800 rounded mb-3"></div>
-                        <div className="h-4 w-1/2 bg-slate-800 rounded mb-3"></div>
-                        <div className="h-32 w-full bg-slate-800 rounded"></div>
-                    </div>
-                    )}
-                </div>
-                )}
-            </div>
-            </div>
-        ) : (
-            <HistorySection 
-                history={history} 
-                onUpdateClip={handleUpdateClip} 
-                sunoCookie={sunoCookie} // Pass the cookie
-                onResync={handleRefreshHistory}
-                isSyncing={isSyncingHistory}
-            />
-        )}
+        {renderContent()}
       </main>
       <Footer git="https://github.com/xiliourt/Suno-Architect/" />
     </div>
