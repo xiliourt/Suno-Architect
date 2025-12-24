@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { ParsedSunoOutput } from "../types";
+import { STRICT_OUTPUT_SUFFIX } from "../constants";
 
 export const generateSunoPrompt = async (
   userInput: string, 
@@ -18,12 +19,15 @@ export const generateSunoPrompt = async (
       throw new Error("System Instruction is missing.");
   }
 
+  // Enforce strict output format by appending the constant rule set
+  const finalSystemInstruction = `${systemInstruction}\n\n${STRICT_OUTPUT_SUFFIX}`;
+
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: userInput,
       config: {
-        systemInstruction: systemInstruction,
+        systemInstruction: finalSystemInstruction,
         temperature: 0.8,
       },
     });
@@ -39,7 +43,7 @@ export const generateSunoPrompt = async (
 
 /**
  * Parses the raw markdown response.
- * Expected structure (Based on SUNO_SYSTEM_INSTRUCTION):
+ * Expected structure (Based on STRICT_OUTPUT_SUFFIX):
  * Block 1: Style
  * Block 2: Title
  * Block 3: Exclude Styles
@@ -167,7 +171,6 @@ function setVocalGender(targetGender) {
             if (isSelected !== shouldBeSelected) { btn.click(); }
         }
     }
-}
 
 
 // --- MAIN EXECUTION ---
