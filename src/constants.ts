@@ -1,10 +1,12 @@
 import { SunoLibrary, LyricalConstraints } from "./types";
 
 export const SUNO_MODEL_MAPPINGS = [
-    { label: "V4.5+ (Latest)", value: "chirp-bluejay" },
-    { label: "V4.0", value: "chirp-v4" },
-    { label: "V3.5", value: "chirp-v3-5" },
-    { label: "V3.0", value: "chirp-v3-0" },
+  { label: "V3", value: "chirp-v3-0" },
+  { label: "V3.5", value: "chirp-v3-5" },
+  { label: "V4", value: "chirp-v4" },
+  { label: "V4.5", value: "chirp-auk" },
+  { label: "V4.5+", value: "chirp-bluejay" },
+  { label: "V5", value: "chirp-crow" },
 ];
 
 export const DEFAULT_SUNO_LIBRARY: SunoLibrary = {
