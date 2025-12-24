@@ -213,9 +213,9 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in duration-500">
       {history.map((clip) => {
         const isItemDraft = isDraft(clip);
-        // Correct image URL patterns
-        const imageUrl = `https://cdn2.suno.ai/image_${clip.id}.jpeg?width=100`;
-        const largeImageUrl = `https://cdn2.suno.ai/image_large_${clip.id}.jpeg`;
+        // Prioritize explicit image URL from API, otherwise construct it
+        const imageUrl = clip.imageUrl || `https://cdn2.suno.ai/image_${clip.id}.jpeg?width=100`;
+        const largeImageUrl = clip.imageLargeUrl || `https://cdn2.suno.ai/image_large_${clip.id}.jpeg`;
         const songUrl = `https://suno.com/song/${clip.id}`;
         
         return (
