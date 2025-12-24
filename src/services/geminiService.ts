@@ -44,11 +44,14 @@ export const generateSunoPrompt = async (
 
 /**
  * Groups aligned words into lines matching the original lyrics structure using Gemini.
+ * Uses a hybrid approach: takes JavaScript-generated pseudo-lines as a draft and perfects it.
  */
 export const groupLyricsByLines = async (
   lyrics: string,
   alignedWords: AlignedWord[],
-  customApiKey?: string
+  customApiKey?: string,
+  modelName: string = "gemini-3-flash-preview",
+  pseudoLines?: AlignedWord[][] // New optional parameter
 ): Promise<AlignedWord[][]> => {
   const apiKey = customApiKey || process.env.API_KEY;
   if (!apiKey) throw new Error("API Key required for smart grouping.");
@@ -58,34 +61,36 @@ export const groupLyricsByLines = async (
   // SANITIZATION & OPTIMIZATION:
   // 1. Trim words to remove excess whitespace.
   // 2. Round timestamps to 2 decimal places to significantly reduce token count.
-  // 3. This simplified structure helps the model process much faster.
   const simplifiedWords = alignedWords.map(w => ({ 
       w: w.word.trim(), 
       s: Number(w.start_s.toFixed(2)), 
       e: Number(w.end_s.toFixed(2)) 
   }));
 
-  // Robust prompt to map audio events (stream) to visual structure (text)
+  // Create a simplified representation of the pseudo-lines if they exist
+  // This acts as a "Draft" for the AI to correct, rather than starting from scratch
+  const draftRepresentation = pseudoLines ? pseudoLines.map(line => 
+      line.map(w => ({ w: w.word.trim(), s: Number(w.start_s.toFixed(2)), e: Number(w.end_s.toFixed(2)) }))
+  ) : [];
+
   const prompt = `
   Role: Lyric Synchronizer.
-  Task: Group the provided stream of timestamped words into lines that correspond to the visual structure of the original lyrics.
-
-  --- Original Lyrics (Visual Guide) ---
+  Task: The user has a "Draft Grouping" of audio events based on timing (silence gaps). Your job is to REFACTOR this draft to match the "Visual Guide" (Official Lyrics).
+  
+  --- Visual Guide (The Target Structure) ---
   ${lyrics}
   --- End Visual Guide ---
   
-  --- Stream of Timestamped Words (Audio Events) ---
-  ${JSON.stringify(simplifiedWords)}
-  --- End Stream ---
+  --- Draft Grouping (Based on Audio Pauses) ---
+  ${JSON.stringify(draftRepresentation.length > 0 ? draftRepresentation : simplifiedWords)}
+  --- End Draft ---
   
   Instructions:
-  1. The "Stream" represents exactly what was sung, in order. You must use EVERY word from the Stream.
-  2. Maintain the exact sequence of the Stream. Do not reorder words.
-  3. Group the words into an array of arrays, where each inner array is a line of text.
-  4. Use the "Original Lyrics" as the primary guide for where to break lines.
-  5. If the "Original Lyrics" are unformatted (no line breaks), infer the structure based on natural phrasing and rhymes.
-  6. If the audio (Stream) repeats sections (like a chorus repeated twice) which are only written once in the text, you must output the lines multiple times to match the Stream.
-  7. If the audio contains ad-libs not in the text, append them to the nearest logical line or create a new line if significant.
+  1. The "Draft Grouping" contains the correct words and timestamps but usually has incorrect line breaks (splitting lines too early or merging them).
+  2. You must output a JSON object containing the words grouped strictly according to the "Visual Guide".
+  3. You MUST use the specific word objects (w, s, e) provided in the Draft. Do not invent timestamps.
+  4. If the visual guide has 4 lines, your output must have 4 arrays (unless the audio repeats a section).
+  5. If the audio repeats a chorus that is written only once in the text, write it out multiple times in your output to match the audio events.
   
   Output JSON format:
   { "lines": [[{"w": "word", "s": 1.2, "e": 1.5}, ...], ...] }
@@ -93,11 +98,11 @@ export const groupLyricsByLines = async (
 
   try {
       const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash", // Fast model, good for JSON tasks
+          model: modelName, 
           contents: prompt,
           config: { 
               responseMimeType: "application/json",
-              temperature: 0.1 // Lower temperature for more deterministic/structural tasks
+              temperature: 0.1 // Low temp for structural precision
           }
       });
       
