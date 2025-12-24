@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import CopyButton from './CopyButton';
 import { getSunoCredits } from '../services/sunoApi';
 import { SUNO_MODEL_MAPPINGS, buildKnowledgeBase, GET_PROMPT_V1, GET_PROMPT_V2, DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS } from '../constants';
@@ -31,6 +31,10 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyStatus, setVerifyStatus] = useState<{success: boolean, msg: string} | null>(null);
   const [localCredits, setLocalCredits] = useState<number | null>(null);
+
+  // Model Dropdown State
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   // Prompt Settings State
   const [promptSettings, setPromptSettings] = useState<PromptSettings>(initialPromptSettings);
@@ -69,6 +73,21 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
         setConstRhymes(initialPromptSettings.constraints.forbiddenRhymes);
     }
   }, [isOpen, initialCookie, initialModel, currentCredits, initialPromptSettings]);
+
+  // Click outside listener for dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
+        setIsModelDropdownOpen(false);
+      }
+    }
+    if (isModelDropdownOpen) {
+        document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isModelDropdownOpen]);
 
   // Handle version switching to auto-fill custom prompt if switching to a preset
   const handleVersionChange = (newVersion: 'v1' | 'v2' | 'custom') => {
@@ -289,17 +308,50 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
                         )}
                     </div>
 
-                    <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
+                    <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700" ref={modelDropdownRef}>
                         <label className="block text-sm font-medium text-slate-300 mb-2">Generation Model</label>
-                        <select
-                            value={model}
-                            onChange={(e) => setModel(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/50 transition-all appearance-none"
-                        >
-                            {SUNO_MODEL_MAPPINGS.map((m) => (
-                                <option key={m.value} value={m.value}>{m.label} ({m.value})</option>
-                            ))}
-                        </select>
+                        <div className="relative">
+                            <button
+                                onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/50 transition-all flex items-center justify-between"
+                            >
+                                <span>{SUNO_MODEL_MAPPINGS.find(m => m.value === model)?.label || model} ({model})</span>
+                                <svg 
+                                    xmlns="http://www.w3.org/2000/svg" 
+                                    viewBox="0 0 24 24" 
+                                    fill="none" 
+                                    stroke="currentColor" 
+                                    strokeWidth="2" 
+                                    strokeLinecap="round" 
+                                    strokeLinejoin="round" 
+                                    className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`}
+                                >
+                                    <polyline points="6 9 12 15 18 9" />
+                                </svg>
+                            </button>
+                            
+                            {isModelDropdownOpen && (
+                                <div className="absolute bottom-full left-0 right-0 mb-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden z-20 max-h-48 overflow-y-auto custom-scrollbar">
+                                    {SUNO_MODEL_MAPPINGS.map((m) => (
+                                        <button
+                                            key={m.value}
+                                            onClick={() => { setModel(m.value); setIsModelDropdownOpen(false); }}
+                                            className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center justify-between
+                                            ${model === m.value 
+                                                ? 'bg-pink-600/20 text-pink-300' 
+                                                : 'text-slate-300 hover:bg-slate-700/50 hover:text-white'}`}
+                                        >
+                                            <span>{m.label}</span>
+                                            {model === m.value && (
+                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-pink-400">
+                                                    <polyline points="20 6 9 17 4 12" />
+                                                </svg>
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
