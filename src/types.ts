@@ -46,3 +46,25 @@ export interface AlignedWord {
 export interface LyricAlignmentResponse {
   aligned_words: AlignedWord[];
 }
+
+export interface SunoLibrary {
+  genres: string[];
+  structures: string[];
+  vocalStyles: string[];
+  production: string[];
+  theory: string[];
+}
+
+export interface LyricalConstraints {
+  forbidden: string[];
+  forbiddenAdjectives: string[];
+  forbiddenPhrases: string[];
+  forbiddenRhymes: string; // Keep as string for simple editing
+}
+
+export interface PromptSettings {
+  version: 'v1' | 'v2' | 'custom';
+  customSystemPrompt: string;
+  library: SunoLibrary;
+  constraints: LyricalConstraints;
+}

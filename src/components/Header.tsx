@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { SUNO_MODEL_MAPPINGS } from '../constants';
 
 interface HeaderProps {
@@ -8,6 +8,8 @@ interface HeaderProps {
   sunoCredits: number | null;
   sunoModel?: string;
   onModelChange?: (model: string) => void;
+  geminiModel: string;
+  onGeminiModelChange: (model: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
@@ -16,12 +18,40 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSunoSettings,
   sunoCredits,
   sunoModel,
-  onModelChange
+  onModelChange,
+  geminiModel,
+  onGeminiModelChange
 }) => {
   const [hasKey, setHasKey] = useState(false);
   const [isAiStudio, setIsAiStudio] = useState(false);
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [manualKey, setManualKey] = useState('');
+
+  // Custom Dropdown State for Gemini
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Custom Dropdown State for Suno
+  const [isSunoDropdownOpen, setIsSunoDropdownOpen] = useState(false);
+  const sunoDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Click outside listener for dropdowns
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsModelDropdownOpen(false);
+      }
+      if (sunoDropdownRef.current && !sunoDropdownRef.current.contains(event.target as Node)) {
+        setIsSunoDropdownOpen(false);
+      }
+    }
+    if (isModelDropdownOpen || isSunoDropdownOpen) {
+        document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isModelDropdownOpen, isSunoDropdownOpen]);
 
   useEffect(() => {
     const checkEnv = async () => {
@@ -124,7 +154,7 @@ export const Header: React.FC<HeaderProps> = ({
         {showKeyInput && !isAiStudio && (
             <div className="absolute top-14 right-0 bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-2xl w-80 z-50 animate-in fade-in slide-in-from-top-2">
                 <label className="block text-xs font-semibold text-slate-400 mb-2">Enter your Gemini API Key</label>
-                <div className="flex gap-2">
+                <div className="flex gap-2 mb-4">
                     <input 
                         type="password" 
                         value={manualKey}
@@ -154,6 +184,70 @@ export const Header: React.FC<HeaderProps> = ({
                         </svg>
                     </button>
                 </div>
+                
+                {/* Gemini Model Selector - Custom Dropdown */}
+                <div className="pt-3 border-t border-slate-700" ref={dropdownRef}>
+                     <label className="block text-xs font-semibold text-slate-400 mb-2">Gemini Model</label>
+                     
+                     <div className="relative">
+                        <button
+                            onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all flex items-center justify-between group hover:border-slate-600"
+                        >
+                            <span className="truncate font-medium text-slate-200">
+                                {geminiModel === 'gemini-3-flash-preview' ? 'Gemini 3.0 Flash (Preview)' : 'Gemini 2.5 Flash'}
+                            </span>
+                            <svg 
+                                xmlns="http://www.w3.org/2000/svg" 
+                                viewBox="0 0 24 24" 
+                                fill="none" 
+                                stroke="currentColor" 
+                                strokeWidth="2" 
+                                strokeLinecap="round" 
+                                strokeLinejoin="round" 
+                                className={`w-4 h-4 text-slate-500 group-hover:text-slate-300 transition-transform duration-200 ${isModelDropdownOpen ? 'rotate-180' : ''}`}
+                            >
+                                <polyline points="6 9 12 15 18 9" />
+                            </svg>
+                        </button>
+
+                        {isModelDropdownOpen && (
+                            <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/20">
+                                <div className="py-1">
+                                    <button
+                                        onClick={() => { onGeminiModelChange('gemini-3-flash-preview'); setIsModelDropdownOpen(false); }}
+                                        className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center justify-between
+                                        ${geminiModel === 'gemini-3-flash-preview' 
+                                            ? 'bg-purple-600/20 text-purple-300' 
+                                            : 'text-slate-300 hover:bg-slate-700/50 hover:text-white'}`}
+                                    >
+                                        <span>Gemini 3.0 Flash (Preview)</span>
+                                        {geminiModel === 'gemini-3-flash-preview' && (
+                                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-purple-400">
+                                                <polyline points="20 6 9 17 4 12" />
+                                            </svg>
+                                        )}
+                                    </button>
+                                    <button
+                                        onClick={() => { onGeminiModelChange('gemini-2.5-flash'); setIsModelDropdownOpen(false); }}
+                                        className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center justify-between
+                                        ${geminiModel === 'gemini-2.5-flash' 
+                                            ? 'bg-purple-600/20 text-purple-300' 
+                                            : 'text-slate-300 hover:bg-slate-700/50 hover:text-white'}`}
+                                    >
+                                        <span>Gemini 2.5 Flash</span>
+                                        {geminiModel === 'gemini-2.5-flash' && (
+                                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-purple-400">
+                                                <polyline points="20 6 9 17 4 12" />
+                                            </svg>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                     </div>
+                </div>
+
                 <p className="text-[10px] text-slate-500 mt-3 leading-relaxed">
                     Your key is stored locally in your browser. 
                     <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-purple-400 hover:text-purple-300 hover:underline ml-1 transition-colors">
@@ -173,18 +267,56 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
             </div>
 
-            {/* Header Model Selector */}
-            <div className="hidden sm:block">
-              <select
-                value={sunoModel}
-                onChange={(e) => onModelChange && onModelChange(e.target.value)}
-                className="bg-slate-800/50 border border-slate-700/50 text-slate-300 text-xs font-bold py-2 px-2 rounded-lg hover:bg-slate-700/50 focus:outline-none focus:ring-1 focus:ring-purple-500/50 transition-all cursor-pointer"
+            {/* Header Model Selector - Custom Dropdown */}
+            <div className="hidden sm:block relative" ref={sunoDropdownRef}>
+              <button
+                onClick={() => setIsSunoDropdownOpen(!isSunoDropdownOpen)}
+                className="flex items-center justify-between gap-2 bg-slate-800/50 border border-slate-700/50 text-slate-300 text-xs font-bold py-2 px-3 rounded-lg hover:bg-slate-700/50 hover:text-white transition-all min-w-[140px]"
                 title="Select Suno Model"
               >
-                {SUNO_MODEL_MAPPINGS.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
+                 <span className="truncate">
+                    {SUNO_MODEL_MAPPINGS.find(m => m.value === sunoModel)?.label || 'Select Model'}
+                 </span>
+                 <svg 
+                    xmlns="http://www.w3.org/2000/svg" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    strokeWidth="2" 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round" 
+                    className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-200 ${isSunoDropdownOpen ? 'rotate-180' : ''}`}
+                >
+                    <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+
+              {isSunoDropdownOpen && (
+                 <div className="absolute top-full right-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-100 ring-1 ring-black/20">
+                    <div className="py-1">
+                        {SUNO_MODEL_MAPPINGS.map((m) => (
+                            <button
+                                key={m.value}
+                                onClick={() => { 
+                                    if(onModelChange) onModelChange(m.value); 
+                                    setIsSunoDropdownOpen(false); 
+                                }}
+                                className={`w-full text-left px-3 py-2 text-xs font-medium transition-colors flex items-center justify-between
+                                ${sunoModel === m.value 
+                                    ? 'bg-purple-600/20 text-purple-300' 
+                                    : 'text-slate-300 hover:bg-slate-700/50 hover:text-white'}`}
+                            >
+                                <span>{m.label}</span>
+                                {sunoModel === m.value && (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-purple-400">
+                                    <polyline points="20 6 9 17 4 12" />
+                                    </svg>
+                                )}
+                            </button>
+                        ))}
+                    </div>
+                 </div>
+              )}
             </div>
           </>
         )}

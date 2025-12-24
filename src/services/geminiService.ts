@@ -1,8 +1,13 @@
 import { GoogleGenAI } from "@google/genai";
-import { SUNO_SYSTEM_INSTRUCTION } from "../constants";
 import { ParsedSunoOutput } from "../types";
+import { STRICT_OUTPUT_SUFFIX } from "../constants";
 
-export const generateSunoPrompt = async (userInput: string, customApiKey?: string): Promise<ParsedSunoOutput> => {
+export const generateSunoPrompt = async (
+  userInput: string, 
+  customApiKey?: string,
+  systemInstruction?: string,
+  geminiModel: string = "gemini-3-flash-preview"
+): Promise<ParsedSunoOutput> => {
   const apiKey = customApiKey || process.env.API_KEY;
 
   if (!apiKey) {
@@ -11,12 +16,19 @@ export const generateSunoPrompt = async (userInput: string, customApiKey?: strin
 
   const ai = new GoogleGenAI({ apiKey });
 
+  if (!systemInstruction) {
+      throw new Error("System Instruction is missing.");
+  }
+
+  // Enforce strict output format by appending the constant rule set
+  const finalSystemInstruction = `${systemInstruction}\n\n${STRICT_OUTPUT_SUFFIX}`;
+
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: geminiModel,
       contents: userInput,
       config: {
-        systemInstruction: SUNO_SYSTEM_INSTRUCTION,
+        systemInstruction: finalSystemInstruction,
         temperature: 0.8,
       },
     });
@@ -31,8 +43,21 @@ export const generateSunoPrompt = async (userInput: string, customApiKey?: strin
 };
 
 /**
+ * Helper to remove trailing hyphens/dashes from end of lines
+ * This fixes the issue where the model uses "-" as a caesura at line end.
+ */
+const cleanTrailingHyphens = (text: string): string => {
+    if (!text) return "";
+    // Matches any dash-like char at end of line (multiline)
+    // - normal hyphen
+    // – en dash
+    // — em dash
+    return text.replace(/[ \t]*[-–—]+[ \t]*$/gm, "");
+};
+
+/**
  * Parses the raw markdown response.
- * Expected structure (Based on SUNO_SYSTEM_INSTRUCTION):
+ * Expected structure (Based on STRICT_OUTPUT_SUFFIX):
  * Block 1: Style
  * Block 2: Title
  * Block 3: Exclude Styles
@@ -70,16 +95,18 @@ const parseResponse = (fullText: string): ParsedSunoOutput => {
   // 3. Exclude Styles
   if (matches.length > 2) result.excludeStyles = matches[2] === "None" ? "" : matches[2];
   // 4. Lyrics (Formatted)
-  if (matches.length > 3) result.lyricsWithTags = matches[3];
+  if (matches.length > 3) result.lyricsWithTags = cleanTrailingHyphens(matches[3]);
   // 5. Lyrics (Clean)
-  if (matches.length > 4) result.lyricsAlone = matches[4];
+  if (matches.length > 4) result.lyricsAlone = cleanTrailingHyphens(matches[4]);
 
   // Extract Advanced Parameters (Plain text looking for specific keys)
+  // We use a cleaner that removes Markdown list characters (*, -) and leading whitespace, 
+  // but preserves the end of the line (e.g. 50% or (Tenor))
   const paramLines = fullText.split('\n').filter(line => 
     line.toLowerCase().includes('vocal gender') || 
     line.toLowerCase().includes('weirdness') || 
     line.toLowerCase().includes('style influence')
-  ).map(line => line.replace(/^\W+|\W+$/g, '').trim()); // Clean bullets
+  ).map(line => line.replace(/^[\s\*\-\u2022]+/, '').trim());
 
   if (paramLines.length > 0) {
     result.advancedParams = paramLines.join('\n');

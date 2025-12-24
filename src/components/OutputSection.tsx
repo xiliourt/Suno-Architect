@@ -32,11 +32,17 @@ const OutputSection: React.FC<OutputSectionProps> = ({ data, sunoCookie, sunoMod
     }
   };
 
+  // Helper to determine grid columns based on available data
+  const gridCols = [data.title, data.style, data.excludeStyles].filter(Boolean).length;
+  const gridClass = gridCols === 3 
+    ? "grid grid-cols-1 md:grid-cols-3 gap-4" 
+    : "grid grid-cols-1 md:grid-cols-2 gap-4";
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       
-      {/* Title & Style Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Meta Data Grid (Title, Style, Exclude) */}
+      <div className={gridClass}>
         {data.title && (
             <div className="bg-slate-800/80 border border-slate-700 rounded-xl overflow-hidden shadow-lg flex flex-col">
             <div className="bg-slate-900/50 px-4 py-3 border-b border-slate-700 flex justify-between items-center shrink-0">
@@ -68,6 +74,22 @@ const OutputSection: React.FC<OutputSectionProps> = ({ data, sunoCookie, sunoMod
             </div>
             </div>
         )}
+
+        {data.excludeStyles && (
+            <div className="bg-slate-800/80 border border-slate-700 rounded-xl overflow-hidden shadow-lg flex flex-col">
+            <div className="bg-slate-900/50 px-4 py-3 border-b border-slate-700 flex justify-between items-center shrink-0">
+                <h3 className="text-sm font-semibold text-red-300 uppercase tracking-wider">Exclude Styles</h3>
+                <CopyButton text={data.excludeStyles} label="Copy" />
+            </div>
+            <div className="p-4 bg-slate-900/30 flex-grow">
+                <div className="max-h-[160px] overflow-y-auto custom-scrollbar">
+                    <pre className="whitespace-pre-wrap font-mono text-sm text-red-200 w-full break-words">
+                    {data.excludeStyles}
+                    </pre>
+                </div>
+            </div>
+            </div>
+        )}
       </div>
 
       {/* Advanced Parameters */}
@@ -75,18 +97,12 @@ const OutputSection: React.FC<OutputSectionProps> = ({ data, sunoCookie, sunoMod
         <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 flex flex-wrap gap-4 justify-between items-center">
            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider min-w-[150px]">Advanced Params:</h3>
            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-300 font-mono">
-              {data.advancedParams.split('\n').map((param, i) => (
+              {data.advancedParams.split('\n').filter(Boolean).map((param, i) => (
                   <span key={i} className="flex items-center">
                     <span className="w-1.5 h-1.5 rounded-full bg-pink-500 mr-2"></span>
-                    {param.replace(/^\W+/, '')}
+                    {param}
                   </span>
               ))}
-               {data.excludeStyles && (
-                  <span className="flex items-center text-red-300">
-                     <span className="w-1.5 h-1.5 rounded-full bg-red-500 mr-2"></span>
-                     Exclude: {data.excludeStyles}
-                  </span>
-               )}
            </div>
         </div>
       )}
