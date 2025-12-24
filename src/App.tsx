@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import InputSection from './components/InputSection';
 import OutputSection from './components/OutputSection';
 import { Header } from './components/Header';
@@ -6,7 +6,7 @@ import { generateSunoPrompt } from './services/geminiService';
 import { GenerationState, SunoClip, ParsedSunoOutput } from './types';
 import Footer from './components/Footer';
 import SunoSettingsModal from './components/SunoSettingsModal';
-import { getSunoCredits, updateSunoMetadata } from './services/sunoApi';
+import { getSunoCredits, updateSunoMetadata, getSunoFeed } from './services/sunoApi';
 import HistorySection from './components/HistorySection';
 
 type ViewMode = 'generator' | 'history';
@@ -40,6 +40,9 @@ const App: React.FC = () => {
   const [sunoModel, setSunoModel] = useState('chirp-bluejay'); // Default to V4.5+
   const [sunoCredits, setSunoCredits] = useState<number | null>(null);
 
+  // Ref to prevent double fetching in strict mode
+  const historyFetchedRef = useRef(false);
+
   // Load Suno Cookie and Model from local storage on mount
   useEffect(() => {
     const savedCookie = localStorage.getItem('suno_cookie');
@@ -49,6 +52,12 @@ const App: React.FC = () => {
       setSunoCookie(savedCookie);
       // Try to fetch credits silently on load if cookie exists
       getSunoCredits(savedCookie).then(setSunoCredits).catch(console.error);
+      
+      // Fetch History if not already fetched
+      if (!historyFetchedRef.current) {
+          historyFetchedRef.current = true;
+          fetchAndMergeSunoHistory(savedCookie);
+      }
     }
     if (savedModel) {
       setSunoModel(savedModel);
@@ -60,6 +69,72 @@ const App: React.FC = () => {
     localStorage.setItem('suno_history', JSON.stringify(history));
   }, [history]);
 
+  const fetchAndMergeSunoHistory = async (cookie: string) => {
+    try {
+        const feedData = await getSunoFeed(cookie);
+        if (feedData && Array.isArray(feedData.clips)) {
+            const newClips: SunoClip[] = feedData.clips.map((clip: any) => {
+                // Map the remote clip to our SunoClip structure
+                const metadata = clip.metadata || {};
+                const tags = metadata.tags || '';
+                const prompt = metadata.prompt || '';
+                const title = clip.title || 'Untitled';
+
+                // Construct a faux originalData to make it compatible with our editor
+                const originalData: ParsedSunoOutput = {
+                    style: tags,
+                    title: title,
+                    excludeStyles: metadata.negative_tags || '',
+                    advancedParams: '', // Can't easily reconstruct raw params string
+                    vocalGender: '', // Could try to extract from tags
+                    weirdness: metadata.control_sliders?.weirdness_constraint ? Math.round(metadata.control_sliders.weirdness_constraint * 100) : 50,
+                    styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
+                    lyricsWithTags: prompt,
+                    lyricsAlone: prompt, // Use prompt as clean lyrics as fallback
+                    javascriptCode: '',
+                    fullResponse: ''
+                };
+
+                return {
+                    id: clip.id,
+                    title: title,
+                    created_at: clip.created_at,
+                    model_name: clip.model_name || 'unknown',
+                    imageUrl: clip.image_url,
+                    imageLargeUrl: clip.image_large_url,
+                    metadata: {
+                        tags: tags,
+                        prompt: prompt
+                    },
+                    originalData: originalData
+                };
+            });
+
+            setHistory(prevHistory => {
+                // Merge strategies:
+                // 1. Keep all local drafts (ids starting with 'draft_')
+                // 2. Add new clips from Suno if they don't exist in local history
+                // 3. Update existing Suno clips in local history with fresh data (e.g. status, image url)
+                
+                const existingMap = new Map(prevHistory.map(item => [item.id, item]));
+                
+                newClips.forEach(newClip => {
+                    existingMap.set(newClip.id, newClip);
+                });
+
+                // Convert back to array and sort by date descending
+                const merged = Array.from(existingMap.values()).sort((a, b) => 
+                    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                );
+                
+                return merged;
+            });
+        }
+    } catch (e) {
+        console.error("Failed to fetch history feed", e);
+    }
+  };
+
   const handleSaveSunoConfig = (cookie: string, model: string) => {
     setSunoCookie(cookie);
     setSunoModel(model);
@@ -68,6 +143,9 @@ const App: React.FC = () => {
       localStorage.setItem('suno_cookie', cookie);
       // Refresh credits when saved
       getSunoCredits(cookie).then(setSunoCredits).catch(() => setSunoCredits(null));
+      // Refresh history
+      historyFetchedRef.current = true; // reset logic not strictly needed here but useful if we wanted to enforce single fetch logic
+      fetchAndMergeSunoHistory(cookie);
     } else {
       localStorage.removeItem('suno_cookie');
       setSunoCredits(null);
@@ -103,6 +181,8 @@ const App: React.FC = () => {
             title: clip.title || 'Untitled',
             created_at: clip.created_at,
             model_name: clip.model_name,
+            imageUrl: clip.image_url, // Store image URL if returned
+            imageLargeUrl: clip.image_large_url,
             metadata: {
                 tags: clip.metadata?.tags || '',
                 prompt: clip.metadata?.prompt || ''
