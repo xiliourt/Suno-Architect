@@ -84,7 +84,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
       
       try {
           // Update metadata first if we have the original data (clean lyrics)
-          if (selectedClip.originalData) {
+          if (selectedClip.originalData?.fullResponse) {
               await updateSunoMetadata(selectedClip.id, selectedClip.originalData, sunoCookie);
           }
 
@@ -122,8 +122,6 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
       let lrcContent = '';
       alignedWords.forEach(wordObj => {
           const time = formatLrcTime(wordObj.start_s);
-          // Clean word to remove extra newlines for LRC line consistency if desired, 
-          // or keep exactly as requested:
           lrcContent += `${time}${wordObj.word}\n`;
       });
       return lrcContent;
@@ -205,8 +203,11 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
           vocalGender: orig?.vocalGender,
           weirdness: orig?.weirdness,
           influence: orig?.styleInfluence,
+          isRich: !!orig?.fullResponse
       };
   };
+
+  const clipData = selectedClip ? getClipData(selectedClip) : null;
 
   return (
     <>
@@ -312,7 +313,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
     </div>
 
     {/* Details Modal */}
-    {selectedClip && (
+    {selectedClip && clipData && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200" onClick={closeModal}>
             <div 
                 className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden" 
@@ -322,7 +323,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
                 <div className="p-4 border-b border-slate-800 flex justify-between items-start bg-slate-900/50">
                     <div>
                         <h2 className="text-xl font-bold text-white leading-tight pr-4">
-                            {getClipData(selectedClip).title}
+                            {clipData.title}
                         </h2>
                         <div className="flex items-center gap-2 mt-1 text-xs text-slate-400">
                              <span className="font-mono bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">{selectedClip.model_name}</span>
@@ -344,34 +345,34 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
                 <div className="p-6 overflow-y-auto custom-scrollbar space-y-6 bg-slate-950/30">
                     
                     {/* Style Tags */}
-                    {getClipData(selectedClip).style && (
+                    {clipData.style && (
                         <div className="space-y-2">
                              <div className="flex justify-between items-center">
                                 <h3 className="text-xs font-bold text-purple-400 uppercase tracking-wider">Style Tags</h3>
-                                <CopyButton text={getClipData(selectedClip).style} label="Copy" />
+                                <CopyButton text={clipData.style} label="Copy" />
                              </div>
                              <div className="p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg">
-                                <p className="text-sm text-slate-200 font-mono break-words">{getClipData(selectedClip).style}</p>
+                                <p className="text-sm text-slate-200 font-mono break-words">{clipData.style}</p>
                              </div>
                         </div>
                     )}
 
                     {/* Exclude & Params */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {getClipData(selectedClip).excludeStyles && (
+                        {clipData.excludeStyles && (
                              <div className="space-y-2">
                                 <h3 className="text-xs font-bold text-red-400 uppercase tracking-wider">Excluded Styles</h3>
                                 <div className="p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg h-full">
-                                    <p className="text-sm text-red-200 font-mono break-words">{getClipData(selectedClip).excludeStyles}</p>
+                                    <p className="text-sm text-red-200 font-mono break-words">{clipData.excludeStyles}</p>
                                 </div>
                             </div>
                         )}
                         
-                        {getClipData(selectedClip).advancedParams && (
+                        {clipData.advancedParams && (
                              <div className="space-y-2">
                                 <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider">Parameters</h3>
                                 <div className="p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg h-full text-sm text-slate-300 font-mono space-y-1">
-                                    {getClipData(selectedClip).advancedParams.split('\n').map((line, i) => (
+                                    {clipData.advancedParams.split('\n').map((line, i) => (
                                         <div key={i} className="flex items-start gap-2">
                                             <span className="text-blue-500">•</span>
                                             <span>{line.replace(/^\W+/, '')}</span>
@@ -500,28 +501,30 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
                         </div>
                     )}
 
-                    {/* Lyrics */}
-                    {getClipData(selectedClip).lyrics && (
+                    {/* Lyrics - Only show "Lyrics with Meta Tags" if it is rich data (from local generation) */}
+                    {clipData.isRich && clipData.lyrics && (
                          <div className="space-y-2 pt-2 border-t border-slate-800">
                              <div className="flex justify-between items-center">
                                 <h3 className="text-xs font-bold text-pink-400 uppercase tracking-wider">Lyrics with Meta Tags</h3>
-                                <CopyButton text={getClipData(selectedClip).lyrics} label="Copy Lyrics" />
+                                <CopyButton text={clipData.lyrics} label="Copy Lyrics" />
                              </div>
                              <div className="p-4 bg-slate-900 border border-slate-800 rounded-lg max-h-[300px] overflow-y-auto custom-scrollbar">
-                                <pre className="text-sm text-slate-300 font-mono whitespace-pre-wrap leading-relaxed">{getClipData(selectedClip).lyrics}</pre>
+                                <pre className="text-sm text-slate-300 font-mono whitespace-pre-wrap leading-relaxed">{clipData.lyrics}</pre>
                              </div>
                         </div>
                     )}
 
-                     {/* Clean Lyrics */}
-                     {getClipData(selectedClip).cleanLyrics && (
+                     {/* Clean Lyrics / Raw Prompt - Always show */}
+                     {clipData.cleanLyrics && (
                          <div className="space-y-2">
                              <div className="flex justify-between items-center">
-                                <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Clean Lyrics</h3>
-                                <CopyButton text={getClipData(selectedClip).cleanLyrics} label="Copy Clean" />
+                                <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                                    {clipData.isRich ? "Clean Lyrics" : "Lyrics / Prompt"}
+                                </h3>
+                                <CopyButton text={clipData.cleanLyrics} label="Copy" />
                              </div>
                              <div className="p-4 bg-slate-900 border border-slate-800 rounded-lg max-h-[200px] overflow-y-auto custom-scrollbar">
-                                <pre className="text-sm text-slate-400 font-mono whitespace-pre-wrap leading-relaxed">{getClipData(selectedClip).cleanLyrics}</pre>
+                                <pre className="text-sm text-slate-400 font-mono whitespace-pre-wrap leading-relaxed">{clipData.cleanLyrics}</pre>
                              </div>
                         </div>
                     )}
