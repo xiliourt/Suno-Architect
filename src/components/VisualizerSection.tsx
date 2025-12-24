@@ -238,10 +238,27 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           if (activeLineIdx === -1) {
               const upcomingIdx = lines.findIndex(line => line.length > 0 && line[0].start_s > time);
               if (upcomingIdx !== -1) {
-                  activeLineIdx = upcomingIdx;
+                  // INTRO LOGIC:
+                  // If we are significantly before the start of the first line (> 4s), 
+                  // don't snap to it yet. Keep screen center empty.
+                  // This fixes the issue where lyrics appear at 0:00 for songs with long intros.
+                  const timeToStart = lines[upcomingIdx][0].start_s - time;
+                  
+                  if (upcomingIdx === 0 && timeToStart > 4) {
+                       activeLineIdx = -1; // Remain in "Intro" state
+                  } else {
+                       activeLineIdx = upcomingIdx; // Pre-roll: Snap to upcoming line
+                  }
               } else {
                   activeLineIdx = lines.length - 1;
               }
+          }
+          
+          if (activeLineIdx === -1) {
+               // Render simple intro indicator
+               ctx.font = 'italic 24px Inter, sans-serif';
+               ctx.fillStyle = 'rgba(255,255,255,0.2)';
+               ctx.fillText("...", width / 2, height / 2);
           }
 
           const renderLine = (lineIdx: number, offsetY: number, scale: number, alpha: number) => {
