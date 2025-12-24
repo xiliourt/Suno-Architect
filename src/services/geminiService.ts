@@ -43,6 +43,19 @@ export const generateSunoPrompt = async (
 };
 
 /**
+ * Helper to remove trailing hyphens/dashes from end of lines
+ * This fixes the issue where the model uses "-" as a caesura at line end.
+ */
+const cleanTrailingHyphens = (text: string): string => {
+    if (!text) return "";
+    // Matches any dash-like char at end of line (multiline)
+    // - normal hyphen
+    // – en dash
+    // — em dash
+    return text.replace(/[ \t]*[-–—]+[ \t]*$/gm, "");
+};
+
+/**
  * Parses the raw markdown response.
  * Expected structure (Based on STRICT_OUTPUT_SUFFIX):
  * Block 1: Style
@@ -82,9 +95,9 @@ const parseResponse = (fullText: string): ParsedSunoOutput => {
   // 3. Exclude Styles
   if (matches.length > 2) result.excludeStyles = matches[2] === "None" ? "" : matches[2];
   // 4. Lyrics (Formatted)
-  if (matches.length > 3) result.lyricsWithTags = matches[3];
+  if (matches.length > 3) result.lyricsWithTags = cleanTrailingHyphens(matches[3]);
   // 5. Lyrics (Clean)
-  if (matches.length > 4) result.lyricsAlone = matches[4];
+  if (matches.length > 4) result.lyricsAlone = cleanTrailingHyphens(matches[4]);
 
   // Extract Advanced Parameters (Plain text looking for specific keys)
   // We use a cleaner that removes Markdown list characters (*, -) and leading whitespace, 
