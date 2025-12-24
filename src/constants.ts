@@ -66,6 +66,17 @@ ${library.theory.join(", ")}
 
 ## 6. Advanced Generation Parameters
 (Standard Suno Parameters: Exclude Styles, Vocal Gender, Weirdness, Style Influence)
+**Style Influence (Token Weight):**
+* 0-30% (Loose): Suggestions only.
+* 40-60% (Balanced): Default recommendation.
+* 60-80% (Strict): Required for complex timing (e.g., "7/8 time") or sub-genres.
+
+---
+
+## 7. Reference Examples
+* **Psychedelic Rock:** Weirdness 60%, Style Influence 65%.
+* **Modern EDM:** Weirdness 40%, Style Influence 70%, Exclude: Acoustic.
+* **Indie Folk:** Weirdness 30%, Style Influence 50%, Exclude: Electronic.
 `;
 };
 
