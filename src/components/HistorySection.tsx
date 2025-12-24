@@ -7,9 +7,11 @@ interface HistorySectionProps {
   history: SunoClip[];
   onUpdateClip: (id: string, updates: Partial<SunoClip>) => void;
   sunoCookie?: string;
+  onResync: () => void;
+  isSyncing: boolean;
 }
 
-const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, sunoCookie }) => {
+const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, sunoCookie, onResync, isSyncing }) => {
   const [selectedClip, setSelectedClip] = useState<SunoClip | null>(null);
   const [manualIdInput, setManualIdInput] = useState('');
   
@@ -83,11 +85,6 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
       setAlignmentError(null);
       
       try {
-          // Update metadata first if we have the original data (clean lyrics)
-          if (selectedClip.originalData?.fullResponse) {
-              await updateSunoMetadata(selectedClip.id, selectedClip.originalData, sunoCookie);
-          }
-
           const result = await getLyricAlignment(selectedClip.id, sunoCookie);
           if (result && result.aligned_words) {
               const newData = result.aligned_words;
@@ -181,15 +178,6 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
       return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
   };
 
-  if (history.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center p-12 text-center border-2 border-dashed border-slate-800 rounded-2xl bg-slate-900/20 text-slate-600 min-h-[400px]">
-        <p className="text-lg font-medium">No History Yet</p>
-        <p className="text-sm mt-1">Generated songs and prompts will appear here.</p>
-      </div>
-    );
-  }
-
   // Helper to safely get data, falling back to basic metadata if originalData is missing
   const getClipData = (clip: SunoClip) => {
       const orig = clip.originalData;
@@ -210,107 +198,156 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
   const clipData = selectedClip ? getClipData(selectedClip) : null;
 
   return (
-    <>
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in duration-500">
-      {history.map((clip) => {
-        const isItemDraft = isDraft(clip);
-        // Prioritize explicit image URL from API, otherwise construct it
-        const imageUrl = clip.imageUrl || `https://cdn2.suno.ai/image_${clip.id}.jpeg?width=100`;
-        const largeImageUrl = clip.imageLargeUrl || `https://cdn2.suno.ai/image_large_${clip.id}.jpeg`;
-        const songUrl = `https://suno.com/song/${clip.id}`;
-        
-        return (
-          <div 
-            key={clip.id} 
-            onClick={() => setSelectedClip(clip)}
-            className="bg-slate-800/80 border border-slate-700 rounded-xl overflow-hidden shadow-lg hover:shadow-purple-500/10 transition-all hover:border-slate-600 flex flex-row h-[100px] cursor-pointer group/card"
-          >
-            <div className="relative w-[100px] h-full shrink-0 bg-slate-900 group">
-              {isItemDraft ? (
-                <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-600">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 opacity-50">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                    </svg>
-                </div>
+    <div className="space-y-6 animate-in fade-in duration-500">
+      
+      {/* History Toolbar */}
+      <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 backdrop-blur-sm shadow-sm">
+           <div>
+               <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                   Your Library
+                   {history.length > 0 && <span className="text-xs font-normal text-slate-400">({history.length} items)</span>}
+               </h2>
+               <p className="text-xs text-slate-400">Manage your generated prompts and Suno generations.</p>
+           </div>
+           
+           <button
+             onClick={onResync}
+             disabled={isSyncing}
+             className={`px-4 py-2 rounded-lg text-xs font-bold transition-all border flex items-center gap-2 shadow-lg
+             ${isSyncing 
+                ? 'bg-slate-700/50 text-slate-400 border-slate-600 cursor-wait' 
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600 hover:border-slate-500 hover:text-white'}`}
+             title="Clears local drafts and fetches the last 20 clips from Suno"
+           >
+              {isSyncing ? (
+                 <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                 </svg>
               ) : (
-                <>
-                <img 
-                    src={imageUrl} 
-                    alt={clip.title || 'Generated Song'} 
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                    (e.target as HTMLImageElement).src = 'https://placehold.co/100x100/1e293b/475569?text=No+Image';
-                    }}
-                />
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2">
-                    <a 
-                        href={songUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-white p-2 rounded-full bg-purple-600 hover:bg-purple-500 shadow-sm transform hover:scale-110 transition-transform"
-                        title="Listen on Suno"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                            <path d="M8 5v14l11-7z" />
-                        </svg>
-                    </a>
-
-                    {/* Download Button Overlay */}
-                    <button
-                        onClick={(e) => handleDownloadImage(e, largeImageUrl, `${clip.title || 'suno-cover'}.jpeg`)}
-                        className="absolute top-1 right-1 text-white/70 hover:text-white bg-black/60 hover:bg-black/80 p-1 rounded backdrop-blur-sm transition-all transform hover:scale-105"
-                        title="Download High-Res Cover Art"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
-                        </svg>
-                    </button>
-                </div>
-                </>
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
+                    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                    <path d="M16 16h5v5" />
+                 </svg>
               )}
-            </div>
-            
-            <div className="p-3 flex-grow flex flex-col justify-between overflow-hidden">
-              <div>
-                  <h3 className="text-base font-bold text-white truncate leading-tight mb-1 group-hover/card:text-purple-400 transition-colors" title={clip.title}>
-                    {clip.title || 'Untitled Song'}
-                  </h3>
-                  <div className="flex items-center gap-2 text-xs text-slate-500">
-                     <span className={`font-mono px-1.5 py-0.5 rounded ${isItemDraft ? 'bg-slate-700 text-slate-300' : 'bg-slate-900 text-slate-400'}`}>
-                        {clip.model_name}
-                     </span>
-                     <span>•</span>
-                     <span>{new Date(clip.created_at).toLocaleDateString()}</span>
-                  </div>
-              </div>
-              
-              <div className="flex items-center justify-between mt-1">
-                  <span className="text-xs text-slate-500 truncate">
-                    Click for details
-                  </span>
-                  {!isItemDraft && (
-                    <a 
-                        href={songUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-xs text-purple-400 hover:text-purple-300 hover:underline truncate"
-                    >
-                        View on Suno.com
-                    </a>
-                  )}
-                  {isItemDraft && (
-                      <span className="text-xs text-slate-600 italic">Draft Prompt</span>
-                  )}
-              </div>
-            </div>
+              <span>Resync & Clear Drafts</span>
+           </button>
+      </div>
+
+      {history.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-12 text-center border-2 border-dashed border-slate-800 rounded-2xl bg-slate-900/20 text-slate-600 min-h-[300px]">
+            <p className="text-lg font-medium">No History Yet</p>
+            <p className="text-sm mt-1 mb-4">Generated songs and prompts will appear here.</p>
+            {!sunoCookie && (
+                <p className="text-xs text-purple-400 bg-purple-900/10 px-3 py-1 rounded-full border border-purple-900/30">
+                    Connect Suno API in settings to sync your feed.
+                </p>
+            )}
           </div>
-        );
-      })}
-    </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {history.map((clip) => {
+            const isItemDraft = isDraft(clip);
+            // Prioritize explicit image URL from API, otherwise construct it
+            const imageUrl = clip.imageUrl || `https://cdn2.suno.ai/image_${clip.id}.jpeg?width=100`;
+            const largeImageUrl = clip.imageLargeUrl || `https://cdn2.suno.ai/image_large_${clip.id}.jpeg`;
+            const songUrl = `https://suno.com/song/${clip.id}`;
+            
+            return (
+            <div 
+                key={clip.id} 
+                onClick={() => setSelectedClip(clip)}
+                className="bg-slate-800/80 border border-slate-700 rounded-xl overflow-hidden shadow-lg hover:shadow-purple-500/10 transition-all hover:border-slate-600 flex flex-row h-[100px] cursor-pointer group/card"
+            >
+                <div className="relative w-[100px] h-full shrink-0 bg-slate-900 group">
+                {isItemDraft ? (
+                    <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 opacity-50">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                        </svg>
+                    </div>
+                ) : (
+                    <>
+                    <img 
+                        src={imageUrl} 
+                        alt={clip.title || 'Generated Song'} 
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'https://placehold.co/100x100/1e293b/475569?text=No+Image';
+                        }}
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2">
+                        <a 
+                            href={songUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-white p-2 rounded-full bg-purple-600 hover:bg-purple-500 shadow-sm transform hover:scale-110 transition-transform"
+                            title="Listen on Suno"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                                <path d="M8 5v14l11-7z" />
+                            </svg>
+                        </a>
+
+                        {/* Download Button Overlay */}
+                        <button
+                            onClick={(e) => handleDownloadImage(e, largeImageUrl, `${clip.title || 'suno-cover'}.jpeg`)}
+                            className="absolute top-1 right-1 text-white/70 hover:text-white bg-black/60 hover:bg-black/80 p-1 rounded backdrop-blur-sm transition-all transform hover:scale-105"
+                            title="Download High-Res Cover Art"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                        </button>
+                    </div>
+                    </>
+                )}
+                </div>
+                
+                <div className="p-3 flex-grow flex flex-col justify-between overflow-hidden">
+                <div>
+                    <h3 className="text-base font-bold text-white truncate leading-tight mb-1 group-hover/card:text-purple-400 transition-colors" title={clip.title}>
+                        {clip.title || 'Untitled Song'}
+                    </h3>
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <span className={`font-mono px-1.5 py-0.5 rounded ${isItemDraft ? 'bg-slate-700 text-slate-300' : 'bg-slate-900 text-slate-400'}`}>
+                            {clip.model_name}
+                        </span>
+                        <span>•</span>
+                        <span>{new Date(clip.created_at).toLocaleDateString()}</span>
+                    </div>
+                </div>
+                
+                <div className="flex items-center justify-between mt-1">
+                    <span className="text-xs text-slate-500 truncate">
+                        Click for details
+                    </span>
+                    {!isItemDraft && (
+                        <a 
+                            href={songUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-xs text-purple-400 hover:text-purple-300 hover:underline truncate"
+                        >
+                            View on Suno.com
+                        </a>
+                    )}
+                    {isItemDraft && (
+                        <span className="text-xs text-slate-600 italic">Draft Prompt</span>
+                    )}
+                </div>
+                </div>
+            </div>
+            );
+        })}
+        </div>
+      )}
 
     {/* Details Modal */}
     {selectedClip && clipData && (
@@ -596,7 +633,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
             </div>
         </div>
     )}
-    </>
+    </div>
   );
 };
 
