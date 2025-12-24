@@ -817,3 +817,12 @@ You must output your response in exactly **5 separate code blocks** in the speci
 Use the following detailed guide to select the most appropriate tags and parameters:
 ${SUNO_TAGS_KNOWLEDGE}
 `;
+
+export const SUNO_MODEL_MAPPINGS = [
+  { label: "V3", value: "chirp-v3-0" },
+  { label: "V3.5", value: "chirp-v3-5" },
+  { label: "V4", value: "chirp-v4" },
+  { label: "V4.5", value: "chirp-auk" },
+  { label: "V4.5+", value: "chirp-bluejay" },
+  { label: "V5", value: "chirp-crow" },
+];

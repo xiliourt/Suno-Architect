@@ -17,3 +17,30 @@ export interface GenerationState {
   error: string | null;
   result: ParsedSunoOutput | null;
 }
+
+export interface SunoClip {
+  id: string;
+  title: string;
+  created_at: string;
+  model_name: string;
+  metadata: {
+    tags: string;
+    prompt: string;
+  };
+  originalData?: ParsedSunoOutput;
+  alignmentData?: AlignedWord[];
+  lrcContent?: string;
+  srtContent?: string;
+}
+
+export interface AlignedWord {
+  word: string;
+  start_s: number;
+  end_s: number;
+  success: boolean;
+  p_align: number;
+}
+
+export interface LyricAlignmentResponse {
+  aligned_words: AlignedWord[];
+}

@@ -6,9 +6,11 @@ import { triggerSunoGeneration } from '../services/sunoApi';
 interface OutputSectionProps {
   data: ParsedSunoOutput;
   sunoCookie?: string;
+  sunoModel?: string;
+  onSyncSuccess?: (response: any, originalData: ParsedSunoOutput) => void;
 }
 
-const OutputSection: React.FC<OutputSectionProps> = ({ data, sunoCookie }) => {
+const OutputSection: React.FC<OutputSectionProps> = ({ data, sunoCookie, sunoModel, onSyncSuccess }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<{success: boolean, msg: string} | null>(null);
 
@@ -18,8 +20,11 @@ const OutputSection: React.FC<OutputSectionProps> = ({ data, sunoCookie }) => {
     setSyncStatus(null);
     
     try {
-        await triggerSunoGeneration(data, sunoCookie);
+        const result = await triggerSunoGeneration(data, sunoCookie, sunoModel);
         setSyncStatus({ success: true, msg: "Successfully sent to Suno!" });
+        if (onSyncSuccess) {
+            onSyncSuccess(result, data);
+        }
     } catch (err: any) {
         setSyncStatus({ success: false, msg: err.message || "Failed to sync." });
     } finally {

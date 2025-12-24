@@ -1,25 +1,62 @@
 import React, { useState, useEffect } from 'react';
 import CopyButton from './CopyButton';
+import { getSunoCredits } from '../services/sunoApi';
+import { SUNO_MODEL_MAPPINGS } from '../constants';
 
 interface SunoSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (cookie: string) => void;
+  onSave: (cookie: string, model: string) => void;
   initialCookie: string;
+  initialModel: string;
+  currentCredits: number | null;
 }
 
-const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({ isOpen, onClose, onSave, initialCookie }) => {
+const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  onSave, 
+  initialCookie, 
+  initialModel,
+  currentCredits 
+}) => {
   const [cookie, setCookie] = useState('');
+  const [model, setModel] = useState('chirp-bluejay');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyStatus, setVerifyStatus] = useState<{success: boolean, msg: string} | null>(null);
+  const [localCredits, setLocalCredits] = useState<number | null>(null);
 
   useEffect(() => {
     setCookie(initialCookie);
-  }, [initialCookie, isOpen]);
+    setModel(initialModel || 'chirp-bluejay');
+    setLocalCredits(currentCredits);
+  }, [initialCookie, initialModel, currentCredits, isOpen]);
 
   if (!isOpen) return null;
 
   const handleSave = () => {
-    onSave(cookie);
+    onSave(cookie, model);
     onClose();
+  };
+
+  const handleVerify = async () => {
+      if (!cookie) {
+          setVerifyStatus({ success: false, msg: "Please enter a token first." });
+          return;
+      }
+      setIsVerifying(true);
+      setVerifyStatus(null);
+      try {
+          const credits = await getSunoCredits(cookie);
+          setLocalCredits(credits);
+          setVerifyStatus({ success: true, msg: "Connected Successfully!" });
+          // Auto-save on success? Maybe not, let user confirm.
+      } catch (e: any) {
+          setLocalCredits(null);
+          setVerifyStatus({ success: false, msg: "Login Failed. Check token." });
+      } finally {
+          setIsVerifying(false);
+      }
   };
 
   const tokenSnippet = `(function() {
@@ -66,8 +103,8 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({ isOpen, onClose, 
             To sync directly with Suno, provide your <strong>Authorization Token</strong> (Bearer) or Session Cookie.
           </p>
 
-          {/* Helper Box */}
-          <div className="bg-slate-950/50 border border-purple-500/20 rounded-xl p-4">
+           {/* 1. Auto-Get Token Script (Moved to Top) */}
+           <div className="bg-slate-950/50 border border-purple-500/20 rounded-xl p-4">
              <div className="flex justify-between items-start mb-2">
                 <h3 className="text-xs font-bold text-purple-300 uppercase tracking-wider">
                     Auto-Get Token Script
@@ -84,22 +121,65 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({ isOpen, onClose, 
              </div>
           </div>
 
+          {/* 2. Token Input */}
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">
-              Suno Token / Cookie
-            </label>
+            <div className="flex justify-between items-center mb-2">
+                 <label className="block text-sm font-medium text-slate-300">
+                    Suno Token / Cookie
+                 </label>
+                 {localCredits !== null && (
+                     <span className="text-xs font-bold text-emerald-400 bg-emerald-900/30 px-2 py-1 rounded">
+                         Credits: {localCredits}
+                     </span>
+                 )}
+            </div>
             <textarea
               value={cookie}
               onChange={(e) => setCookie(e.target.value)}
               placeholder="Paste your Bearer Token (ey...) here..."
               className="w-full h-24 bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs font-mono text-slate-300 placeholder-slate-600 focus:ring-2 focus:ring-pink-500 focus:border-transparent outline-none custom-scrollbar resize-none"
             />
-             <span className="text-yellow-500/80 text-xs mt-2 block bg-yellow-900/10 p-2 rounded border border-yellow-900/30">
-               ⚠️ <strong>Recommendation:</strong> Use the <strong>Bearer Token</strong> (starts with <code>ey...</code>).
-            </span>
+            
+            <div className="flex justify-between items-center mt-2">
+                <span className="text-yellow-500/80 text-xs block bg-yellow-900/10 p-2 rounded border border-yellow-900/30 flex-1 mr-4">
+                ⚠️ <strong>Recommendation:</strong> Use the <strong>Bearer Token</strong>.
+                </span>
+                <button
+                    onClick={handleVerify}
+                    disabled={isVerifying || !cookie}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap
+                        ${isVerifying ? 'bg-slate-700 text-slate-400 cursor-wait' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+                >
+                    {isVerifying ? 'Checking...' : 'Login & Verify'}
+                </button>
+            </div>
+            {verifyStatus && (
+                <div className={`mt-2 text-xs font-medium ${verifyStatus.success ? 'text-green-400' : 'text-red-400'}`}>
+                    {verifyStatus.msg}
+                </div>
+            )}
           </div>
 
-          <div className="flex justify-end gap-3 pt-2">
+          {/* 3. Model Selection (Moved to Bottom) */}
+          <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
+             <label className="block text-sm font-medium text-slate-300 mb-2">
+                Generation Model
+             </label>
+             <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-pink-500/50 transition-all appearance-none"
+             >
+                {SUNO_MODEL_MAPPINGS.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label} ({m.value})</option>
+                ))}
+             </select>
+             <p className="text-xs text-slate-500 mt-2">
+                 Select the audio model version to use for generations.
+             </p>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
             <button
               onClick={onClose}
               className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"

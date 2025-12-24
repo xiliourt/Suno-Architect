@@ -1,12 +1,23 @@
 import React, { useEffect, useState } from 'react';
+import { SUNO_MODEL_MAPPINGS } from '../constants';
 
 interface HeaderProps {
   onKeyUpdate: (key: string) => void;
   onValidationChange: (isValid: boolean) => void;
   onOpenSunoSettings: () => void;
+  sunoCredits: number | null;
+  sunoModel?: string;
+  onModelChange?: (model: string) => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onKeyUpdate, onValidationChange, onOpenSunoSettings }) => {
+export const Header: React.FC<HeaderProps> = ({ 
+  onKeyUpdate, 
+  onValidationChange, 
+  onOpenSunoSettings,
+  sunoCredits,
+  sunoModel,
+  onModelChange
+}) => {
   const [hasKey, setHasKey] = useState(false);
   const [isAiStudio, setIsAiStudio] = useState(false);
   const [showKeyInput, setShowKeyInput] = useState(false);
@@ -151,17 +162,44 @@ export const Header: React.FC<HeaderProps> = ({ onKeyUpdate, onValidationChange,
                 </p>
             </div>
         )}
+        
+        {/* Credits Display & Model Selector - Visible when logged in (credits not null) */}
+        {sunoCredits !== null && (
+          <>
+            <div className="hidden sm:flex items-center gap-2 bg-slate-800/50 border border-slate-700/50 px-3 py-1 rounded-lg mr-1 backdrop-blur-sm">
+                <div className="flex flex-col items-end leading-none">
+                    <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-0.5">Credits</span>
+                    <span className="text-sm font-bold text-emerald-400 font-mono">{sunoCredits}</span>
+                </div>
+            </div>
+
+            {/* Header Model Selector */}
+            <div className="hidden sm:block">
+              <select
+                value={sunoModel}
+                onChange={(e) => onModelChange && onModelChange(e.target.value)}
+                className="bg-slate-800/50 border border-slate-700/50 text-slate-300 text-xs font-bold py-2 px-2 rounded-lg hover:bg-slate-700/50 focus:outline-none focus:ring-1 focus:ring-purple-500/50 transition-all cursor-pointer"
+                title="Select Suno Model"
+              >
+                {SUNO_MODEL_MAPPINGS.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
 
         {/* Suno Settings Button */}
         <button
             onClick={onOpenSunoSettings}
-            className="flex items-center justify-center w-9 h-9 bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700 rounded-lg transition-all"
+            className="flex items-center gap-2 bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700 rounded-lg px-3 py-2 transition-all text-xs font-bold"
             title="Suno Configuration"
         >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                 <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
                 <circle cx="12" cy="12" r="3" />
             </svg>
+            <span>Suno API</span>
         </button>
 
         <button 
@@ -185,7 +223,7 @@ export const Header: React.FC<HeaderProps> = ({ onKeyUpdate, onValidationChange,
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                         <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
                     </svg>
-                    <span>{isAiStudio ? 'API Key' : 'Change Key'}</span>
+                    <span>{isAiStudio ? 'API Key' : 'Gemini Key'}</span>
                 </>
             )}
         </button>

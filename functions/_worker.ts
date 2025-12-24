@@ -1,20 +1,39 @@
-export async function onRequestOptions() {
-  return new Response(null, {
-    status: 204,
-    headers: {
+interface Env {
+  ASSETS: { fetch: (request: Request) => Promise<Response> };
+}
+
+export default {
+  async fetch(request: Request, env: Env) {
+    const url = new URL(request.url);
+
+    // CORS Headers
+    const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Suno-Cookie",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Max-Age": "86400",
-    },
-  });
-}
+    };
 
-export async function onRequestPost(context) {
-  const request = context.request;
-  const sunoUrl = "https://studio-api.prod.suno.com/api/generate/v2/";
+    // Handle OPTIONS
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders,
+      });
+    }
 
-  // 1. Parse incoming body
+    // Handle API Routes
+    if (url.pathname === "/api/suno-proxy" && request.method === "POST") {
+      const sunoUrl = "https://studio-api.prod.suno.com/api/generate/v2/";
+      return handleSunoRequest(request, sunoUrl, corsHeaders);
+    }
+
+    // Serve Static Assets (Frontend)
+    return env.ASSETS.fetch(request);
+  },
+};
+
+async function handleSunoRequest(request: Request, targetUrl: string, corsHeaders: any) {
   let body;
   try {
     body = await request.json();
@@ -23,17 +42,16 @@ export async function onRequestPost(context) {
       status: 400,
       headers: { 
         "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*" 
+        ...corsHeaders
       }
     });
   }
 
-  // 2. Prepare headers
   const authHeader = request.headers.get("Authorization");
   const customCookieHeader = request.headers.get("X-Suno-Cookie");
   
-  // Extract Device-Id from cookie if available (ajs_anonymous_id), otherwise generate random UUID
-  let deviceId = crypto.randomUUID();
+  // Extract Device-Id (reuse logic)
+  let deviceId: string = crypto.randomUUID();
   if (customCookieHeader) {
       try {
         const parts = customCookieHeader.split(';');
@@ -42,22 +60,17 @@ export async function onRequestPost(context) {
             if (key && key.trim() === 'ajs_anonymous_id') {
                 let val = value.trim();
                 try { val = decodeURIComponent(val); } catch(e){}
-                // Remove surrounding quotes if present
                 deviceId = val.replace(/^"+|"+$/g, '');
                 break;
             }
         }
-      } catch (e) {
-          // ignore parsing error
-      }
+      } catch (e) {}
   }
 
-  const headers = {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    // Mimic the User-Agent from the working backend
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Affiliate-Id": "undefined",
-    // Device-Id must be quoted
     "Device-Id": `"${deviceId}"`,
     "x-suno-client": "Android prerelease-4nt180t 1.0.42",
     "X-Requested-With": "com.suno.android",
@@ -66,16 +79,11 @@ export async function onRequestPost(context) {
     "sec-ch-ua-platform": '"Android"'
   };
 
-  if (authHeader) {
-    headers["Authorization"] = authHeader;
-  }
-  
-  if (customCookieHeader) {
-    headers["Cookie"] = customCookieHeader;
-  }
+  if (authHeader) headers["Authorization"] = authHeader;
+  if (customCookieHeader) headers["Cookie"] = customCookieHeader;
 
   try {
-    const sunoResponse = await fetch(sunoUrl, {
+    const sunoResponse = await fetch(targetUrl, {
       method: "POST",
       headers: headers,
       body: JSON.stringify(body)
@@ -87,17 +95,16 @@ export async function onRequestPost(context) {
       status: sunoResponse.status,
       headers: {
         "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Suno-Cookie"
+        ...corsHeaders
       }
     });
 
-  } catch (err) {
+  } catch (err: any) {
     return new Response(JSON.stringify({ error: err.message || "Proxy Error" }), {
       status: 500,
       headers: {
         "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
+        ...corsHeaders
       }
     });
   }
