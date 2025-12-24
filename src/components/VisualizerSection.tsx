@@ -73,42 +73,45 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const audioContextRef = useRef<AudioContext | null>(null);
 
   /**
-   * Helper: Check if a word is a meta tag (contains brackets).
-   * Kept for legacy compatibility, but getCleanAlignedWords is preferred.
-   */
-  const isMetaWord = (word: string) => {
-    return word.includes('[') || word.includes(']');
-  };
-
-  /**
    * Enhanced Helper: Filter out meta words, handling split tags across multiple tokens.
-   * E.g. "0:22 [Intro] [" -> "0:23 Downtempo" -> "0:24 ]"
+   * Uses character-level state machine to handle cases like:
+   * 1. "[Verse 1] Feel" -> "Feel"
+   * 2. "0:22 [Intro] [" -> "0:23 Downtempo" -> "0:24 ]" (All removed)
    */
   const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
       const clean: AlignedWord[] = [];
-      let depth = 0;
+      let bracketDepth = 0;
 
       for (const w of aligned) {
-          const word = w.word;
-          const openCount = (word.match(/\[/g) || []).length;
-          const closeCount = (word.match(/\]/g) || []).length;
+          const originalWord = w.word;
+          let cleanWordBuilder = "";
           
-          // If we were already inside a tag
-          const startedInside = depth > 0;
-          
-          depth += openCount;
-          depth -= closeCount;
-          
-          // If we are still inside a tag
-          const endedInside = depth > 0;
-          
-          // If we were inside, are now inside, or this specific word triggered a tag boundary
-          // We filter it out to avoid showing things like "Intro", "Chorus", "]"
-          if (startedInside || endedInside || openCount > 0 || closeCount > 0) {
-              continue;
+          for (let i = 0; i < originalWord.length; i++) {
+              const char = originalWord[i];
+              if (char === '[') {
+                  bracketDepth++;
+                  continue;
+              }
+              if (char === ']') {
+                  if (bracketDepth > 0) bracketDepth--;
+                  continue;
+              }
+              
+              if (bracketDepth === 0) {
+                  cleanWordBuilder += char;
+              }
           }
           
-          clean.push(w);
+          // Only keep words that have actual content after stripping tags
+          // We trim to ensure we don't keep just whitespace
+          const trimmed = cleanWordBuilder.trim();
+          
+          if (trimmed.length > 0) {
+              clean.push({
+                  ...w,
+                  word: trimmed
+              });
+          }
       }
       return clean;
   };
@@ -210,7 +213,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
    * Robust grouping based on timing gaps (Fallback).
    */
   const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
-      const cleanAligned = getCleanAlignedWords(aligned); // Use new cleaner
+      // Pass aligned words through the cleaner first to ensure no partial/split tags remain
+      const cleanAligned = getCleanAlignedWords(aligned); 
       if (cleanAligned.length === 0) return [];
 
       const groups: AlignedWord[][] = [];
@@ -501,9 +505,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           const measureLine = (idx: number, scale: number) => {
               if (idx < 0 || idx >= lines.length) return null;
               const line = lines[idx];
-              // Use getCleanAlignedWords logic implicitly or filter meta words for display
-              // For display, we can use simple check, as robust filtering was done during grouping
-              const displayWords = line.filter(w => !isMetaWord(w.word));
+              // displayWords are already cleaned by getCleanAlignedWords logic upstream
+              const displayWords = line;
               if (displayWords.length === 0) return null;
 
               let fontSize = 48 * scale;
