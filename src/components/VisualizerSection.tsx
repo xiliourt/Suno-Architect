@@ -252,6 +252,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           
           // 1. JS Heuristics: Generate "Pseudo-lines" based on timing first
           const pseudoLines = groupWordsByTiming(cleanAligned);
+          
+          // Show JS preview immediately while AI thinks
+          setLines(pseudoLines);
 
           // 2. Gemini Refinement: Pass pseudo-lines as a hint to the AI
           const grouped = await groupLyricsByLines(cleanLyrics, cleanAligned, apiKey, geminiModel, pseudoLines);
@@ -259,12 +262,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           if (grouped && grouped.length > 0) {
               setLines(grouped);
           } else {
-              alert("AI couldn't group the lines. Falling back to simple timing.");
-              setLines(pseudoLines);
+             // Already showing pseudoLines, just warn in console
+             console.warn("AI couldn't group the lines. Keeping simple timing.");
           }
       } catch (e) {
           console.error(e);
-          alert("Failed to group lines with AI.");
+          // Alert user but they still have the JS lines visible
+          alert("Failed to group lines with AI. Kept timing-based grouping.");
       } finally {
           setIsGrouping(false);
       }
