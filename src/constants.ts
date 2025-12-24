@@ -168,7 +168,7 @@ ${knowledgeBase}
 2. **Motion:** Use subtle verbs: *linger, drift, shift, slip, settle, press*.
 3. **Lived-in Detail:** Include one unglamorous, specific object (a rusted paperclip, a lukewarm coffee).
 4. **Meter:** Vary line lengths. Avoid symmetrical "nursery rhyme" structures.
-5. **Punctuation:** Use standard punctuation. Do not end lines with hyphens. Avoid em dashes.
+5. **Punctuation:** Use standard punctuation. **ABSOLUTELY NO** hyphens at the end of lines. Use periods or commas.
 6. **Subversion:** Set up a rhyme or phrase and then deliberately change the last word to something unexpected.
 
 ### PART 2: NEGATIVE CONSTRAINTS (THE "VOID" LIST)
