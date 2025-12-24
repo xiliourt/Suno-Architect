@@ -796,7 +796,6 @@ You must output your response in exactly **5 separate code blocks** in the speci
 6. **Lyrics (Clean):**
    Output lyrics ONLY (no meta tags) in a code block.
    \`\`\`text
-   (Verse 1)
    ...
    \`\`\`
 
