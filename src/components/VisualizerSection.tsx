@@ -56,6 +56,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const [alignment, setAlignment] = useState<AlignedWord[] | null>(null);
   const [lines, setLines] = useState<AlignedWord[][]>([]);
   const [lyricSource, setLyricSource] = useState(''); // Text source for structure
+  const [applyStatus, setApplyStatus] = useState<'idle' | 'applied'>('idle');
   
   // Audio/Canvas/Media References
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -156,7 +157,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       const tokens: PromptToken[] = [];
       
       promptLines.forEach((line, idx) => {
-          const words = line.toLowerCase().replace(/[^\w\s]|_/g, "").split(/\s+/).filter(w => w);
+          // Robust tokenization: split by whitespace, remove punctuation characters but preserve letters/numbers (Unicode aware)
+          const words = line.toLowerCase().split(/\s+/).map(w => {
+              // Remove common punctuation marks but keep letters and numbers
+              // Using a safe regex that covers most cases without needing ES2018 property escapes if environment is old
+              // But modern browsers support \p{L}. Fallback to basic stripping.
+              try {
+                return w.replace(/[^\p{L}\p{N}']/gu, ''); 
+              } catch (e) {
+                return w.replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+              }
+          }).filter(w => w.length > 0);
+
           words.forEach(w => tokens.push({ text: w, lineIndex: idx }));
       });
 
@@ -167,7 +179,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
       for (let i = 0; i < cleanAligned.length; i++) {
           const wordObj = cleanAligned[i];
-          const cleanWord = wordObj.word.toLowerCase().replace(/[^\w\s]|_/g, "");
+          let cleanWord = wordObj.word.toLowerCase();
+          try {
+             cleanWord = cleanWord.replace(/[^\p{L}\p{N}']/gu, '');
+          } catch(e) {
+             cleanWord = cleanWord.replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+          }
 
           if (!cleanWord) {
               currentGroup.push(wordObj);
@@ -176,25 +193,22 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
           let matchFound = false;
           let lookahead = 0;
-          const MAX_LOOKAHEAD = 5; // Increased lookahead
+          const MAX_LOOKAHEAD = 8; // Increased lookahead to handle ad-libs or missed words
 
           while (tokenPtr + lookahead < tokens.length && lookahead < MAX_LOOKAHEAD) {
               const target = tokens[tokenPtr + lookahead];
               
+              // Fuzzy match: exact or contains
               if (target.text === cleanWord || target.text.includes(cleanWord) || cleanWord.includes(target.text)) {
                   
                   // If we jumped to a new line index, push old group
                   if (target.lineIndex > currentLineIndex) {
                       if (currentGroup.length > 0) groups.push(currentGroup);
                       currentGroup = [];
-                      
-                      // Handle skipped empty lines in prompt (if any)
-                      // Ideally we'd insert empty groups but visualizer skips them anyway
-                      
                       currentLineIndex = target.lineIndex;
                   }
 
-                  tokenPtr += lookahead + 1;
+                  tokenPtr += lookahead + 1; // Advance token pointer past the match
                   matchFound = true;
                   break; 
               }
@@ -357,6 +371,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     // Use the current lyricSource as the authority
     const newLines = matchWordsToPrompt(alignment, lyricSource);
     setLines(newLines);
+    
+    // UI Feedback
+    setApplyStatus('applied');
+    setTimeout(() => setApplyStatus('idle'), 2000);
   };
 
   const handleSmartGroup = async () => {
@@ -976,10 +994,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                             <button 
                                 onClick={handleApplyLyrics}
                                 disabled={!alignment}
-                                className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-2 py-1 rounded transition-colors disabled:opacity-50"
+                                className={`text-xs px-2 py-1 rounded transition-colors disabled:opacity-50 font-bold border
+                                    ${applyStatus === 'applied' 
+                                        ? 'bg-green-600 border-green-500 text-white' 
+                                        : 'bg-purple-600 hover:bg-purple-500 border-purple-500 text-white'}`}
                                 title="Update lines based on this text"
                             >
-                                Apply Structure
+                                {applyStatus === 'applied' ? 'Applied!' : 'Apply Structure'}
                             </button>
                         </div>
                         <div className="p-2">
