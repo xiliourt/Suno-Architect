@@ -10,6 +10,22 @@ interface VisualizerSectionProps {
   apiKey?: string;
 }
 
+// Worker code as a string to avoid external file dependencies for this component
+const TIMER_WORKER_BLOB = new Blob([`
+  let intervalId = null;
+  self.onmessage = function(e) {
+    if (e.data === 'start') {
+      // Target ~30 FPS
+      intervalId = setInterval(() => {
+        self.postMessage('tick');
+      }, 33);
+    } else if (e.data === 'stop') {
+      if (intervalId) clearInterval(intervalId);
+      intervalId = null;
+    }
+  };
+`], { type: 'application/javascript' });
+
 const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCookie, onUpdateClip, apiKey }) => {
   // Selection State
   const [selectedClipId, setSelectedClipId] = useState<string>('');
@@ -24,6 +40,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const requestRef = useRef<number | null>(null);
+  const workerRef = useRef<Worker | null>(null);
   
   // Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -37,6 +54,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const destinationNodeRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+
+  /**
+   * Helper: Check if a word is a meta tag (contains brackets).
+   */
+  const isMetaWord = (word: string) => {
+    return word.includes('[') || word.includes(']');
+  };
 
   /**
    * Helper: Remove [Meta Tags] and empty lines from text to get clean lyrics.
@@ -54,14 +78,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   };
 
   /**
-   * Helper: Check if a word is a meta tag (contains brackets).
-   */
-  const isMetaWord = (word: string) => {
-      // Aggressively hide anything containing [ or ] to catch split tags like "[Verse" or "1]"
-      return word.includes('[') || word.includes(']');
-  };
-
-  /**
    * Simple heuristic to group words into lines based on clean text lyrics.
    */
   const simpleLineGroup = (textLyrics: string, aligned: AlignedWord[]): AlignedWord[][] => {
@@ -70,7 +86,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       const cleanText = stripMetaTags(textLyrics);
       const textLines = cleanText.split('\n');
       
-      // Filter out any aligned words that look like meta tags
+      // Filter out any aligned words that look like meta tags from the grouping logic
       const cleanAligned = aligned.filter(w => !isMetaWord(w.word));
       
       const groups: AlignedWord[][] = [];
@@ -78,6 +94,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
       for (const line of textLines) {
           // Count "meaningful" words (ignore purely punctuation tokens which usually aren't aligned)
+          // This improves sync when text has " - " or "..." that audio alignment ignores
           const wordsInLine = line.split(/\s+/).filter(w => /[a-zA-Z0-9\u00C0-\u00FF]/.test(w)).length;
           
           if (wordsInLine === 0) continue;
@@ -93,7 +110,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           if (matchedWords.length > 0) groups.push(matchedWords);
       }
       
-      // Dump remaining words into chunks
+      // Dump remaining words into chunks if the text lyrics were shorter than audio lyrics
       if (wordIdx < cleanAligned.length) {
           const remainder = cleanAligned.slice(wordIdx);
           const chunkSize = 6;
@@ -116,7 +133,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         setClipData(fromHistory);
         
         // Determine the best source of lyrics
-        // We STRIP tags from prompt if we use it fallback
         const rawLyrics = fromHistory.originalData?.lyricsAlone || fromHistory.metadata?.prompt || "";
         
         if (fromHistory.alignmentData) {
@@ -183,9 +199,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       
       setIsGrouping(true);
       try {
-          // Filter alignment before sending to AI to avoid it trying to group [Verse] tags
+          // Filter out brackets before sending to AI to prevent confusion
           const cleanAligned = alignment.filter(w => !isMetaWord(w.word));
           
+          // Pass clean lyrics to Gemini so it doesn't get confused by [Verse] tags
           const grouped = await groupLyricsByLines(cleanLyrics, cleanAligned, apiKey);
           if (grouped && grouped.length > 0) {
               setLines(grouped);
@@ -235,10 +252,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
           // Fallback: If in a gap, show the NEXT upcoming line
           if (activeLineIdx === -1) {
+              // Find first line that starts after current time
               const upcomingIdx = lines.findIndex(line => line.length > 0 && line[0].start_s > time);
               if (upcomingIdx !== -1) {
                   activeLineIdx = upcomingIdx;
               } else {
+                  // Past the end of all lines, show the last one
                   activeLineIdx = lines.length - 1;
               }
           }
@@ -247,13 +266,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
              if (lineIdx < 0 || lineIdx >= lines.length) return;
              const line = lines[lineIdx];
              
-             // Filter words for display to ensure no [Tags] show up
+             // VISUAL FILTER: Remove any words with brackets
              const displayWords = line.filter(w => !isMetaWord(w.word));
              if (displayWords.length === 0) return;
 
              const centerY = (height / 2) + offsetY;
              
-             // Dynamic Font Scaling
+             // Dynamic Font Scaling to fit line length
              let fontSize = 48 * scale;
              ctx.font = `bold ${fontSize}px Inter, sans-serif`;
              
@@ -289,18 +308,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                  
                  if (lineIdx === activeLineIdx) {
                     if (isWordActive) {
-                        ctx.fillStyle = '#e879f9'; 
-                        ctx.shadowColor = '#d946ef'; 
+                        ctx.fillStyle = '#e879f9'; // Bright Pink/Purple for active word
+                        ctx.shadowColor = '#d946ef'; // Strong glow
                         ctx.shadowBlur = 25;
                     } else if (isWordPast) {
-                        ctx.fillStyle = '#f1f5f9'; 
+                        ctx.fillStyle = '#f1f5f9'; // White/Slate (sung)
                         ctx.shadowBlur = 0;
                     } else {
-                        ctx.fillStyle = 'rgba(255,255,255,0.3)'; 
+                        ctx.fillStyle = 'rgba(255,255,255,0.3)'; // Dim (future)
                         ctx.shadowBlur = 0;
                     }
                  } else {
-                     ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+                     ctx.fillStyle = `rgba(255,255,255,${alpha})`; // Inactive line
                      ctx.shadowBlur = 0;
                  }
                  
@@ -308,22 +327,28 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                  ctx.fillText(w.word, currentX, centerY);
                  currentX += measurements[i];
              });
+             
+             // Reset Shadow
              ctx.shadowBlur = 0;
           };
 
-          // Render Lines
+          // Render Active Line (Center)
           renderLine(activeLineIdx, 0, 1.2, 1);
+          
+          // Render Previous Lines (fading up/out)
           renderLine(activeLineIdx - 1, -80, 0.8, 0.5);
           renderLine(activeLineIdx - 2, -140, 0.6, 0.2);
+          
+          // Render Next Lines (fading down/in)
           renderLine(activeLineIdx + 1, 80, 0.8, 0.5);
           renderLine(activeLineIdx + 2, 140, 0.6, 0.2);
 
       } else if (alignment) {
-          // Fallback Teleprompter View
+          // Fallback to Teleprompter view
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           
-          // Strict filter for fallback view
+          // VISUAL FILTER: Remove any words with brackets
           const cleanAligned = alignment.filter(w => !isMetaWord(w.word));
 
           const activeIndex = cleanAligned.findIndex(w => time >= w.start_s && time <= w.end_s);
@@ -359,29 +384,32 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
       const audio = audioRef.current;
       if (audio && audio.duration) {
-          const pct = audio.currentTime / audio.duration;
+          const pct = time / audio.duration;
           ctx.fillStyle = '#a855f7';
           ctx.fillRect(0, height - 8, width * pct, 8);
       }
   };
 
-  // Animation Loop
+  // Animation Loop (Standard RAF for preview)
   const animate = () => {
-      if (audioRef.current) {
+      // Only run RAF loop if NOT recording. 
+      // During recording, the worker drives the draw calls to ensure background processing.
+      if (!isRecording && audioRef.current) {
           drawCanvas(audioRef.current.currentTime);
           setProgress(audioRef.current.currentTime);
+          requestRef.current = requestAnimationFrame(animate);
       }
-      requestRef.current = requestAnimationFrame(animate);
   };
 
   useEffect(() => {
-      if (selectedClipId) {
+      if (selectedClipId && !isRecording) {
+          if (requestRef.current) cancelAnimationFrame(requestRef.current);
           requestRef.current = requestAnimationFrame(animate);
       }
       return () => {
           if (requestRef.current) cancelAnimationFrame(requestRef.current);
       };
-  }, [selectedClipId, alignment, lines]);
+  }, [selectedClipId, alignment, lines, isRecording]);
 
   // --- RECORDING LOGIC ---
   const startRecording = async () => {
@@ -397,6 +425,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
           }
           const actx = audioContextRef.current;
+          await actx.resume(); // Ensure context is running
           
           if (!sourceNodeRef.current) {
               sourceNodeRef.current = actx.createMediaElementSource(audio);
@@ -426,11 +455,39 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               a.click();
               document.body.removeChild(a);
               setIsRecording(false);
+              
+              // Stop Worker
+              if (workerRef.current) {
+                  workerRef.current.postMessage('stop');
+                  workerRef.current.terminate();
+                  workerRef.current = null;
+              }
+              
+              // Resume RAF loop
+              requestRef.current = requestAnimationFrame(animate);
           };
 
           mediaRecorderRef.current = recorder;
+          
+          // Stop RAF loop to avoid conflict
+          if (requestRef.current) cancelAnimationFrame(requestRef.current);
+
+          // Start Web Worker for Background Timing
+          const workerUrl = URL.createObjectURL(TIMER_WORKER_BLOB);
+          workerRef.current = new Worker(workerUrl);
+          
+          workerRef.current.onmessage = (e) => {
+              if (e.data === 'tick' && audioRef.current) {
+                  // Drive canvas update from worker tick
+                  drawCanvas(audioRef.current.currentTime);
+                  setProgress(audioRef.current.currentTime);
+              }
+          };
+
           audio.currentTime = 0;
           await audio.play();
+          
+          workerRef.current.postMessage('start');
           recorder.start();
 
           audio.onended = () => {
@@ -450,6 +507,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       }
       if (audioRef.current) {
           audioRef.current.pause();
+      }
+      if (workerRef.current) {
+          workerRef.current.postMessage('stop');
       }
   };
 
@@ -599,7 +659,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                      </button>
                      {isRecording && (
                          <p className="text-xs text-center text-slate-400">
-                             Recording in real-time... please wait until the song finishes.
+                             Recording in background... you can switch tabs.
                          </p>
                      )}
                  </div>
