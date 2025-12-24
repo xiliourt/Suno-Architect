@@ -97,10 +97,10 @@ const OutputSection: React.FC<OutputSectionProps> = ({ data, sunoCookie, sunoMod
         <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 flex flex-wrap gap-4 justify-between items-center">
            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider min-w-[150px]">Advanced Params:</h3>
            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-300 font-mono">
-              {data.advancedParams.split('\n').map((param, i) => (
+              {data.advancedParams.split('\n').filter(Boolean).map((param, i) => (
                   <span key={i} className="flex items-center">
                     <span className="w-1.5 h-1.5 rounded-full bg-pink-500 mr-2"></span>
-                    {param.replace(/^\W+/, '')}
+                    {param}
                   </span>
               ))}
            </div>
