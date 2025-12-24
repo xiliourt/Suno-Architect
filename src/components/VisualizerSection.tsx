@@ -54,6 +54,14 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   };
 
   /**
+   * Helper: Check if a word is a meta tag (contains brackets).
+   */
+  const isMetaWord = (word: string) => {
+      // Aggressively hide anything containing [ or ] to catch split tags like "[Verse" or "1]"
+      return word.includes('[') || word.includes(']');
+  };
+
+  /**
    * Simple heuristic to group words into lines based on clean text lyrics.
    */
   const simpleLineGroup = (textLyrics: string, aligned: AlignedWord[]): AlignedWord[][] => {
@@ -63,18 +71,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       const textLines = cleanText.split('\n');
       
       // Filter out any aligned words that look like meta tags
-      const cleanAligned = aligned.filter(w => {
-          const val = w.word.trim();
-          // Filter [Tag] or (Adlib) if they appeared in audio alignment
-          return !((val.startsWith('[') && val.endsWith(']')) || (val.startsWith('(') && val.endsWith(')')));
-      });
+      const cleanAligned = aligned.filter(w => !isMetaWord(w.word));
       
       const groups: AlignedWord[][] = [];
       let wordIdx = 0;
 
       for (const line of textLines) {
           // Count "meaningful" words (ignore purely punctuation tokens which usually aren't aligned)
-          // This improves sync when text has " - " or "..." that audio alignment ignores
           const wordsInLine = line.split(/\s+/).filter(w => /[a-zA-Z0-9\u00C0-\u00FF]/.test(w)).length;
           
           if (wordsInLine === 0) continue;
@@ -180,8 +183,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       
       setIsGrouping(true);
       try {
-          // Pass clean lyrics to Gemini so it doesn't get confused by [Verse] tags
-          const grouped = await groupLyricsByLines(cleanLyrics, alignment, apiKey);
+          // Filter alignment before sending to AI to avoid it trying to group [Verse] tags
+          const cleanAligned = alignment.filter(w => !isMetaWord(w.word));
+          
+          const grouped = await groupLyricsByLines(cleanLyrics, cleanAligned, apiKey);
           if (grouped && grouped.length > 0) {
               setLines(grouped);
           } else {
@@ -241,15 +246,20 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           const renderLine = (lineIdx: number, offsetY: number, scale: number, alpha: number) => {
              if (lineIdx < 0 || lineIdx >= lines.length) return;
              const line = lines[lineIdx];
+             
+             // Filter words for display to ensure no [Tags] show up
+             const displayWords = line.filter(w => !isMetaWord(w.word));
+             if (displayWords.length === 0) return;
+
              const centerY = (height / 2) + offsetY;
              
              // Dynamic Font Scaling
              let fontSize = 48 * scale;
              ctx.font = `bold ${fontSize}px Inter, sans-serif`;
              
-             // Measure
+             // First Pass: Measure total width
              let totalWidth = 0;
-             const measurements = line.map(w => {
+             const measurements = displayWords.map(w => {
                  const m = ctx.measureText(w.word + " ");
                  totalWidth += m.width;
                  return m.width;
@@ -261,9 +271,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                  const ratio = maxW / totalWidth;
                  fontSize *= ratio;
                  ctx.font = `bold ${fontSize}px Inter, sans-serif`;
+                 // Re-measure with new font size
                  totalWidth = 0;
                  measurements.forEach((_, i) => {
-                     const m = ctx.measureText(line[i].word + " ");
+                     const m = ctx.measureText(displayWords[i].word + " ");
                      measurements[i] = m.width;
                      totalWidth += m.width;
                  });
@@ -271,7 +282,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
              
              let currentX = (width - totalWidth) / 2;
 
-             line.forEach((w, i) => {
+             // Second Pass: Draw words
+             displayWords.forEach((w, i) => {
                  const isWordActive = time >= w.start_s && time <= w.end_s;
                  const isWordPast = time > w.end_s;
                  
@@ -311,8 +323,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           
-          // Filter tags in this view as well
-          const cleanAligned = alignment.filter(w => !/^\[.*\]$/.test(w.word.trim()));
+          // Strict filter for fallback view
+          const cleanAligned = alignment.filter(w => !isMetaWord(w.word));
 
           const activeIndex = cleanAligned.findIndex(w => time >= w.start_s && time <= w.end_s);
           const upcomingIndex = cleanAligned.findIndex(w => w.start_s > time);
