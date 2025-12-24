@@ -105,7 +105,7 @@ export const groupLyricsByLines = async (
       const batchDraft = batches[i]; // Array of arrays (lines)
       
       try {
-          const batchResult = await processBatchWithGemini(batchDraft, lyrics, apiKey, modelName);
+          const batchResult = await processBatchWithGemini(batchDraft, lyrics, apiKey, modelName, i, batches.length);
           finalLines.push(...batchResult);
       } catch (err) {
           console.error(`Batch ${i+1} failed, falling back to original draft for this section.`, err);
@@ -133,31 +133,39 @@ const processBatchWithGemini = async (
     batchDraft: any[][], // Array of lines, where each line is array of {w,s,e}
     fullLyrics: string,
     apiKey: string,
-    modelName: string
+    modelName: string,
+    batchIndex: number,
+    totalBatches: number
 ): Promise<AlignedWord[][]> => {
     const ai = new GoogleGenAI({ apiKey });
 
-    // Flatten batch for the "Draft" view, but keep structure in mind
-    const flatWords = batchDraft.flat();
+    // Pre-process full lyrics into lines to help Gemini match structure instantly
+    // This JSON structure is easier for LLM to map against than raw text block
+    const lyricLines = fullLyrics.split('\n').map(l => l.trim()).filter(l => l);
+    const lyricMap = lyricLines.reduce((acc, line, i) => {
+        acc[i + 1] = line;
+        return acc;
+    }, {} as Record<string, string>);
 
     const prompt = `
   Role: Lyric Synchronizer.
-  Task: You are correcting the line breaks for a SPECIFIC SEGMENT (Batch) of a song.
+  Task: Map the "Audio Draft" words to the "Target Structure" lines.
   
-  --- Full Song Lyrics (Context Only - Do not output all of this) ---
-  ${fullLyrics.substring(0, 3000)} ... [Truncated]
-  --- End Context ---
+  --- Target Structure (Visual Guide) ---
+  ${JSON.stringify(lyricMap)}
+  --- End Target ---
   
-  --- Current Audio Segment (Draft Grouping) ---
+  --- Audio Draft (Batch ${batchIndex + 1}/${totalBatches}) ---
   ${JSON.stringify(batchDraft)}
-  --- End Segment ---
+  --- End Draft ---
   
   Instructions:
-  1. This "Audio Segment" is a small part of the song.
-  2. The "Draft Grouping" has correct words/times but potentially wrong line breaks.
-  3. Refactor the words in the Segment into lines that match the style of the Full Song Lyrics.
-  4. **CRITICAL:** You MUST output EVERY word from the "Current Audio Segment". Do not skip words. Do not add words.
-  5. Output JSON only.
+  1. The "Audio Draft" contains words with timestamps, but potentially incorrect line breaks.
+  2. The "Target Structure" is the official lyrics.
+  3. You are working on a specific segment (Batch ${batchIndex + 1} of ${totalBatches}).
+  4. Your job is to correct the line breaks in the Audio Draft to match the Target Structure.
+  5. **CRITICAL:** You MUST output EVERY word from the "Audio Draft". Do not skip words. Do not add words.
+  6. Output JSON only: A list of lines, where each line is an array of word objects ({w, s, e}).
   
   Output JSON format:
   { "lines": [[{"w": "word", "s": 1.2, "e": 1.5}, ...], ...] }
