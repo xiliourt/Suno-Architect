@@ -3,7 +3,8 @@ import InputSection from './components/InputSection';
 import OutputSection from './components/OutputSection';
 import { Header } from './components/Header';
 import { generateSunoPrompt } from './services/geminiService';
-import { GenerationState, SunoClip, ParsedSunoOutput } from './types';
+import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings } from './types';
+import { DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS, buildKnowledgeBase, GET_PROMPT_V1 } from './constants';
 import Footer from './components/Footer';
 import SunoSettingsModal from './components/SunoSettingsModal';
 import { getSunoCredits, updateSunoMetadata, getSunoFeed } from './services/sunoApi';
@@ -40,6 +41,23 @@ const App: React.FC = () => {
   const [sunoModel, setSunoModel] = useState('chirp-bluejay'); // Default to V4.5+
   const [sunoCredits, setSunoCredits] = useState<number | null>(null);
 
+  // Prompt Settings State
+  const [promptSettings, setPromptSettings] = useState<PromptSettings>(() => {
+      try {
+          const saved = localStorage.getItem('suno_prompt_settings');
+          if (saved) return JSON.parse(saved);
+      } catch(e) {}
+      
+      // Default Initial State
+      const kb = buildKnowledgeBase(DEFAULT_SUNO_LIBRARY);
+      return {
+          version: 'v1',
+          customSystemPrompt: GET_PROMPT_V1(kb),
+          library: DEFAULT_SUNO_LIBRARY,
+          constraints: DEFAULT_LYRICAL_CONSTRAINTS
+      };
+  });
+
   // Ref to prevent double fetching in strict mode
   const historyFetchedRef = useRef(false);
 
@@ -68,6 +86,11 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('suno_history', JSON.stringify(history));
   }, [history]);
+
+  // Persist prompt settings
+  useEffect(() => {
+      localStorage.setItem('suno_prompt_settings', JSON.stringify(promptSettings));
+  }, [promptSettings]);
 
   const fetchAndMergeSunoHistory = async (cookie: string) => {
     try {
@@ -156,9 +179,10 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveSunoConfig = (cookie: string, model: string) => {
+  const handleSaveSunoConfig = (cookie: string, model: string, newSettings: PromptSettings) => {
     setSunoCookie(cookie);
     setSunoModel(model);
+    setPromptSettings(newSettings);
 
     if (cookie) {
       localStorage.setItem('suno_cookie', cookie);
@@ -219,7 +243,8 @@ const App: React.FC = () => {
   const handleGenerate = async (prompt: string) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null, result: null }));
     try {
-      const result = await generateSunoPrompt(prompt, customApiKey);
+      // Pass the customized system prompt
+      const result = await generateSunoPrompt(prompt, customApiKey, promptSettings.customSystemPrompt);
       setState({ isLoading: false, error: null, result });
       
       // Auto-save to history as draft
@@ -267,6 +292,7 @@ const App: React.FC = () => {
         onSave={handleSaveSunoConfig}
         initialCookie={sunoCookie}
         initialModel={sunoModel}
+        initialPromptSettings={promptSettings}
         currentCredits={sunoCredits}
       />
 
