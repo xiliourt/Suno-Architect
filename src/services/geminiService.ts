@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { ParsedSunoOutput } from "../types";
+import { ParsedSunoOutput, AlignedWord } from "../types";
 import { STRICT_OUTPUT_SUFFIX } from "../constants";
 
 export const generateSunoPrompt = async (
@@ -39,6 +39,67 @@ export const generateSunoPrompt = async (
     console.error("Gemini API Error:", error);
     const msg = error.message || "Failed to generate prompt.";
     throw new Error(msg);
+  }
+};
+
+/**
+ * Groups aligned words into lines matching the original lyrics structure using Gemini.
+ */
+export const groupLyricsByLines = async (
+  lyrics: string,
+  alignedWords: AlignedWord[],
+  customApiKey?: string
+): Promise<AlignedWord[][]> => {
+  const apiKey = customApiKey || process.env.API_KEY;
+  if (!apiKey) throw new Error("API Key required for smart grouping.");
+
+  const ai = new GoogleGenAI({ apiKey });
+  
+  // We need to keep the payload reasonably small.
+  // We'll strip some data from alignedWords to save tokens, just sending word and timestamps.
+  const simplifiedWords = alignedWords.map(w => ({ w: w.word, s: w.start_s, e: w.end_s }));
+
+  const prompt = `
+  I have a list of time-aligned words from a song and the original lyrics text.
+  Please group the aligned words into lines that correspond to the structure of the original lyrics.
+  
+  Original Lyrics:
+  """
+  ${lyrics}
+  """
+  
+  Aligned Words (JSON):
+  ${JSON.stringify(simplifiedWords)}
+  
+  Return a JSON Object with a single key "lines" which is an array of arrays of the aligned word objects.
+  Preserve the timestamps exactly.
+  If a word from the aligned list doesn't fit clearly, include it in the nearest line.
+  Structure: { "lines": [[{ "w": "...", "s": 1.2, "e": 1.5 }, ...], ...] }
+  `;
+
+  try {
+      const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash", // Fast model, good for JSON tasks
+          contents: prompt,
+          config: { responseMimeType: "application/json" }
+      });
+      
+      const text = response.text || "{}";
+      const json = JSON.parse(text);
+      if (json.lines && Array.isArray(json.lines)) {
+          // Map back to full AlignedWord shape
+          return json.lines.map((line: any[]) => line.map((w: any) => ({
+              word: w.w,
+              start_s: w.s,
+              end_s: w.e,
+              success: true,
+              p_align: 1
+          })));
+      }
+      return [];
+  } catch (e) {
+      console.error("Failed to parse grouping response", e);
+      return [];
   }
 };
 
