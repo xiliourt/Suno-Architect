@@ -124,7 +124,8 @@ const App: React.FC = () => {
                     weirdness: metadata.control_sliders?.weirdness_constraint ? Math.round(metadata.control_sliders.weirdness_constraint * 100) : 50,
                     styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
                     lyricsWithTags: prompt,
-                    lyricsAlone: prompt, // Use prompt as clean lyrics as fallback
+                    // Strip meta tags (anything in []) for the clean lyrics version
+                    lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(),
                     javascriptCode: '',
                     fullResponse: ''
                 };
@@ -214,7 +215,8 @@ const App: React.FC = () => {
                     weirdness: metadata.control_sliders?.weirdness_constraint ? Math.round(metadata.control_sliders.weirdness_constraint * 100) : 50,
                     styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
                     lyricsWithTags: prompt,
-                    lyricsAlone: prompt,
+                    // Strip meta tags (anything in []) for the clean lyrics version
+                    lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(),
                     javascriptCode: '',
                     fullResponse: ''
                 };
