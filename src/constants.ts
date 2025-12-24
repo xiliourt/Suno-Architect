@@ -8,7 +8,7 @@ export const SUNO_MODEL_MAPPINGS = [
 ];
 
 export const DEFAULT_SUNO_LIBRARY: SunoLibrary = {
-  genres: ["Pop", "K-Pop", "J-Pop", "Synth-pop", "Rock", "Hard Rock", "Alt Rock", "Indie Rock", "Prog Rock", "Punk", "Metal", "Hip-Hop", "Rap", "Trap", "R&B", "Soul", "Drill", "EDM", "House", "Techno", "Trance", "Dubstep", "DnB", "Ambient", "Synthwave", "Folk", "Country", "Jazz", "Blues", "Classical", "Reggae", "Latin"],
+  genres: ["Pop", "K-Pop", "J-Pop", "Synth-pop", "Rock", "Hard Rock", "Alt Rock", "Indie Rock", "Prog Rock", "Punk", "Metal", "Hip-Hop", "Rap", "Trap", "R&B", "Soul", "Drill", "EDM", "House", "Techno", "Trance", "Dubstep", "DnB", "Ambient", "Synthwave", "Folk", "Country", "Jazz", "Blues", "Classical", "Reggae", "Latin", "Hyperpop", "Australian Hip Hop" ],
   structures: ["[Intro]", "[Verse]", "[Pre-Chorus]", "[Chorus]", "[Post-Chorus]", "[Bridge]", "[Outro]", "[Hook]", "[Instrumental Break]", "[Solo Section]", "[Guitar Solo]", "[Drop]", "[Build-up]", "[Spoken Word]"],
   vocalStyles: ["[Male Vocals]", "[Female Vocals]", "[Duet]", "[Choir]", "[Backing Vocals]", "[Powerful Vocals]", "[Whispered]", "[Rapping]", "[Screaming]", "[Growling]", "[Operatic]", "[Autotune]", "[Vocoder]", "[Reverb]", "[Delay]", "[Dry Vocals]"],
   production: ["[Reverb]", "[Delay]", "[Echo]", "[Distortion]", "[Overdrive]", "[Fuzz]", "[Bitcrush]", "[Chorus Effect]", "[Phaser]", "[Flanger]", "[Tremolo]", "[Lo-fi]", "[Hi-fi]", "[Vintage]", "[Wide Stereo]", "[Mono]"],
