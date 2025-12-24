@@ -469,92 +469,128 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                ctx.fillText("...", width / 2, height / 2);
           }
 
-          const renderLine = (lineIdx: number, offsetY: number, scale: number, alpha: number) => {
-             if (lineIdx < 0 || lineIdx >= lines.length) return;
-             const line = lines[lineIdx];
-             const displayWords = line.filter(w => !isMetaWord(w.word));
-             if (displayWords.length === 0) return;
+          // Measure Line Helper
+          const measureLine = (idx: number, scale: number) => {
+              if (idx < 0 || idx >= lines.length) return null;
+              const line = lines[idx];
+              const displayWords = line.filter(w => !isMetaWord(w.word));
+              if (displayWords.length === 0) return null;
 
-             // Font Size Calculation
-             let fontSize = 48 * scale;
-             // Adjust font size for vertical video
-             if (aspectRatio === "9:16") fontSize = 36 * scale; 
+              let fontSize = 48 * scale;
+              if (aspectRatio === "9:16") fontSize = 36 * scale; 
+              
+              ctx.font = `bold ${fontSize}px Inter, sans-serif`;
+              const lineHeight = fontSize * 1.3;
+              const maxW = width * 0.85;
 
-             ctx.font = `bold ${fontSize}px Inter, sans-serif`;
-             const lineHeight = fontSize * 1.3;
-             const maxW = width * 0.85; // Allow text to take up 85% of screen width
+              const wordsWithWidths = displayWords.map(w => ({
+                  ...w,
+                  width: ctx.measureText(w.word + " ").width
+              }));
 
-             // Measure words
-             const wordsWithWidths = displayWords.map(w => ({
-                 ...w,
-                 width: ctx.measureText(w.word + " ").width
-             }));
+              const rows: { words: typeof wordsWithWidths, width: number }[] = [];
+              let currentRow: typeof wordsWithWidths = [];
+              let currentWidth = 0;
 
-             // Word Wrapping Logic
-             const rows: { words: typeof wordsWithWidths, width: number }[] = [];
-             let currentRow: typeof wordsWithWidths = [];
-             let currentWidth = 0;
-
-             wordsWithWidths.forEach(w => {
-                 if (currentWidth + w.width > maxW && currentRow.length > 0) {
-                     rows.push({ words: currentRow, width: currentWidth });
-                     currentRow = [w];
-                     currentWidth = w.width;
-                 } else {
-                     currentRow.push(w);
-                     currentWidth += w.width;
-                 }
-             });
-             if (currentRow.length > 0) {
-                 rows.push({ words: currentRow, width: currentWidth });
-             }
-             
-             // Calculate Vertical Centering for the Text Block
-             // ctx.textBaseline is 'middle' (set in parent scope)
-             const blockCenterY = (height / 2) + offsetY;
-             // Start Y for the first row to ensure the whole block is centered
-             const startY = blockCenterY - ((rows.length - 1) * lineHeight) / 2;
-
-             rows.forEach((row, rowIdx) => {
-                 const rowY = startY + (rowIdx * lineHeight);
-                 let currentX = (width - row.width) / 2;
-
-                 row.words.forEach(w => {
-                     const isWordActive = time >= w.start_s && time <= w.end_s;
-                     const isWordPast = time > w.end_s;
-                     
-                     if (lineIdx === activeLineIdx) {
-                        if (isWordActive) {
-                            ctx.fillStyle = '#e879f9'; 
-                            ctx.shadowColor = '#d946ef'; 
-                            ctx.shadowBlur = 25;
-                        } else if (isWordPast) {
-                            ctx.fillStyle = '#f1f5f9'; 
-                            ctx.shadowBlur = 0;
-                        } else {
-                            ctx.fillStyle = 'rgba(255,255,255,0.3)'; 
-                            ctx.shadowBlur = 0;
-                        }
-                     } else {
-                         ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-                         ctx.shadowBlur = 0;
-                     }
-                     
-                     ctx.textAlign = 'left';
-                     ctx.fillText(w.word, currentX, rowY);
-                     currentX += w.width;
-                 });
-             });
-             ctx.shadowBlur = 0;
+              wordsWithWidths.forEach(w => {
+                  if (currentWidth + w.width > maxW && currentRow.length > 0) {
+                      rows.push({ words: currentRow, width: currentWidth });
+                      currentRow = [w];
+                      currentWidth = w.width;
+                  } else {
+                      currentRow.push(w);
+                      currentWidth += w.width;
+                  }
+              });
+              if (currentRow.length > 0) {
+                  rows.push({ words: currentRow, width: currentWidth });
+              }
+              
+              const totalHeight = rows.length * lineHeight;
+              return { rows, totalHeight, lineHeight, fontSize };
           };
 
-          const spacing = aspectRatio === "9:16" ? 100 : 80;
+          // Draw Line Helper
+          const drawLine = (layout: any, centerY: number, alpha: number, isActive: boolean) => {
+              if (!layout) return;
+              
+              ctx.font = `bold ${layout.fontSize}px Inter, sans-serif`;
+              
+              // startY is the top of the first line in the block
+              // We want the block centered at centerY
+              const startY = centerY - ((layout.rows.length - 1) * layout.lineHeight) / 2;
 
-          renderLine(activeLineIdx, 0, 1.2, 1);
-          renderLine(activeLineIdx - 1, -spacing, 0.8, 0.5);
-          renderLine(activeLineIdx - 2, -(spacing * 1.8), 0.6, 0.2);
-          renderLine(activeLineIdx + 1, spacing, 0.8, 0.5);
-          renderLine(activeLineIdx + 2, (spacing * 1.8), 0.6, 0.2);
+              layout.rows.forEach((row: any, rowIdx: number) => {
+                  const rowY = startY + (rowIdx * layout.lineHeight);
+                  let currentX = (width - row.width) / 2;
+
+                  row.words.forEach((w: any) => {
+                      const isWordActive = time >= w.start_s && time <= w.end_s;
+                      const isWordPast = time > w.end_s;
+
+                      if (isActive) {
+                         if (isWordActive) {
+                             ctx.fillStyle = '#e879f9'; 
+                             ctx.shadowColor = '#d946ef'; 
+                             ctx.shadowBlur = 25;
+                         } else if (isWordPast) {
+                             ctx.fillStyle = '#f1f5f9'; 
+                             ctx.shadowBlur = 0;
+                         } else {
+                             ctx.fillStyle = 'rgba(255,255,255,0.3)'; 
+                             ctx.shadowBlur = 0;
+                         }
+                      } else {
+                          ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+                          ctx.shadowBlur = 0;
+                      }
+
+                      ctx.textAlign = 'left';
+                      ctx.fillText(w.word, currentX, rowY);
+                      currentX += w.width;
+                  });
+              });
+              ctx.shadowBlur = 0;
+          };
+
+          // Calculate Layouts
+          const activeLayout = measureLine(activeLineIdx, 1.2);
+          const prev1Layout = measureLine(activeLineIdx - 1, 0.8);
+          const prev2Layout = measureLine(activeLineIdx - 2, 0.6);
+          const next1Layout = measureLine(activeLineIdx + 1, 0.8);
+          const next2Layout = measureLine(activeLineIdx + 2, 0.6);
+
+          const PADDING = aspectRatio === "9:16" ? 40 : 25;
+          const centerY = height / 2;
+
+          // Draw Active
+          if (activeLayout) drawLine(activeLayout, centerY, 1, true);
+
+          // Draw Previous Lines (Stacked Upwards)
+          if (prev1Layout) {
+              const activeH = activeLayout ? activeLayout.totalHeight : 0;
+              // Center of Prev1 = (Top of Active - Padding) - Half of Prev1
+              const prev1Y = centerY - (activeH / 2) - PADDING - (prev1Layout.totalHeight / 2);
+              drawLine(prev1Layout, prev1Y, 0.5, false);
+
+              if (prev2Layout) {
+                  const prev2Y = prev1Y - (prev1Layout.totalHeight / 2) - PADDING - (prev2Layout.totalHeight / 2);
+                  drawLine(prev2Layout, prev2Y, 0.2, false);
+              }
+          }
+
+          // Draw Next Lines (Stacked Downwards)
+          if (next1Layout) {
+               const activeH = activeLayout ? activeLayout.totalHeight : 0;
+               // Center of Next1 = (Bottom of Active + Padding) + Half of Next1
+               const next1Y = centerY + (activeH / 2) + PADDING + (next1Layout.totalHeight / 2);
+               drawLine(next1Layout, next1Y, 0.5, false);
+
+               if (next2Layout) {
+                   const next2Y = next1Y + (next1Layout.totalHeight / 2) + PADDING + (next2Layout.totalHeight / 2);
+                   drawLine(next2Layout, next2Y, 0.2, false);
+               }
+          }
 
       } else if (alignment) {
           // Fallback if no grouping
