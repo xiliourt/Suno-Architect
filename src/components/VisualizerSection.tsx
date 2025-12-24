@@ -3,7 +3,7 @@ import { SunoClip, AlignedWord } from '../types';
 import { getLyricAlignment } from '../services/sunoApi';
 import { groupLyricsByLines } from '../services/geminiService';
 // @ts-ignore
-import { Muxer, ArrayBufferTarget } from 'webm-muxer';
+import { Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget } from 'webm-muxer';
 
 // Declarations for WebCodecs API
 declare class AudioEncoder {
@@ -380,6 +380,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     setIsRendering(true);
     setRenderProgress(0);
 
+    let fileHandle: any = null;
+    let writableStream: any = null;
+
     try {
         // 1. Fetch & Decode Audio
         const audioSrc = audioRef.current.src;
@@ -392,9 +395,39 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
         const duration = audioBuffer.duration;
 
-        // 2. Setup Muxer
+        // 2. Setup Muxer with FileSystem Strategy if available
+        const filename = `${clipData.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_offline.webm`;
+        let muxerTarget: any;
+
+        // Try direct disk streaming if browser supports it
+        if ('showSaveFilePicker' in window) {
+            try {
+                fileHandle = await (window as any).showSaveFilePicker({
+                    suggestedName: filename,
+                    types: [{
+                        description: 'WebM Video',
+                        accept: { 'video/webm': ['.webm'] },
+                    }],
+                });
+                writableStream = await fileHandle.createWritable();
+                muxerTarget = new FileSystemWritableFileStreamTarget(writableStream);
+            } catch (err: any) {
+                // If user cancels, stop rendering
+                if (err.name === 'AbortError') {
+                    setIsRendering(false);
+                    return;
+                }
+                console.warn("File System Access failed, falling back to RAM.", err);
+            }
+        }
+
+        // Fallback to RAM
+        if (!muxerTarget) {
+            muxerTarget = new ArrayBufferTarget();
+        }
+
         const muxer = new Muxer({
-            target: new ArrayBufferTarget(),
+            target: muxerTarget,
             video: {
                 codec: 'V_VP9',
                 width: 1280,
@@ -408,9 +441,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         });
 
         // 3. Setup Video Encoder
+        // @ts-ignore
         const videoEncoder = new VideoEncoder({
-            output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-            error: (e) => console.error("Video Encoder error", e)
+            output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
+            error: (e: any) => console.error("Video Encoder error", e)
         });
         videoEncoder.configure({
             codec: 'vp09.00.10.08',
@@ -421,9 +455,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         });
 
         // 4. Setup Audio Encoder
+        // @ts-ignore
         const audioEncoder = new AudioEncoder({
-            output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
-            error: (e) => console.error("Audio Encoder error", e)
+            output: (chunk: any, meta: any) => muxer.addAudioChunk(chunk, meta),
+            error: (e: any) => console.error("Audio Encoder error", e)
         });
         audioEncoder.configure({
             codec: 'opus',
@@ -432,24 +467,31 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             bitrate: 128000
         });
 
-        // 5. Render Video Frames
+        // 5. Render Video Frames with BACKPRESSURE
         const fps = 30;
         const totalFrames = Math.ceil(duration * fps);
         const ctx = canvasRef.current.getContext('2d')!;
         
         for (let i = 0; i < totalFrames; i++) {
+            // BACKPRESSURE: If encoder queue is full, wait.
+            // This prevents "Low RAM" crashes by ensuring we don't buffer too many frames in memory.
+            if (videoEncoder.encodeQueueSize > 5) {
+                while (videoEncoder.encodeQueueSize > 2) {
+                    await new Promise(r => setTimeout(r, 10));
+                }
+            }
+
             const t = i / fps;
             renderFrame(ctx, 1280, 720, t);
             
-            // Create frame from canvas
-            // timestamp in microseconds
+            // @ts-ignore
             const frame = new VideoFrame(canvasRef.current, { timestamp: t * 1000000 });
             
             videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
             frame.close();
 
             // Yield to UI periodically
-            if (i % 30 === 0) {
+            if (i % 15 === 0) {
                 setRenderProgress((i / totalFrames) * 100);
                 await new Promise(r => setTimeout(r, 0));
             }
@@ -486,6 +528,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 data.set(chunkData, ch * frames);
             }
 
+            // @ts-ignore
             const audioData = new AudioData({
                 format: 'f32-planar',
                 sampleRate: sourceSampleRate,
@@ -504,17 +547,22 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         await audioEncoder.flush();
         muxer.finalize();
 
-        // 8. Download
-        const { buffer } = muxer.target;
-        const blob = new Blob([buffer], { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${clipData.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_offline.webm`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        // 8. Close Stream or Download
+        if (writableStream) {
+            await writableStream.close();
+        } else {
+            // RAM Fallback: Download the buffer
+            const { buffer } = muxer.target;
+            const blob = new Blob([buffer], { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
 
     } catch (e) {
         console.error("Offline render failed", e);
@@ -679,7 +727,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                      )}
                      {!isRendering && (
                          <p className="text-xs text-center text-slate-400">
-                             Renders at ~10x real-time speed using WebCodecs.
+                             Renders at ~10x speed. <br/>
+                             <span className="text-purple-400">Tip:</span> Use Chrome/Edge for direct-to-disk streaming (Low RAM mode).
                          </p>
                      )}
                  </div>
