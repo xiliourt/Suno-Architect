@@ -65,26 +65,29 @@ export const groupLyricsByLines = async (
       e: Number(w.end_s.toFixed(2)) 
   }));
 
+  // Robust prompt to map audio events (stream) to visual structure (text)
   const prompt = `
-  Task: Group the provided JSON aligned words into lines that match the visual structure of the Original Lyrics.
+  Role: Lyric Synchronizer.
+  Task: Group the provided stream of timestamped words into lines that correspond to the visual structure of the original lyrics.
 
-  Original Lyrics:
-  """
+  --- Original Lyrics (Visual Guide) ---
   ${lyrics}
-  """
+  --- End Visual Guide ---
   
-  Aligned Words (JSON):
+  --- Stream of Timestamped Words (Audio Events) ---
   ${JSON.stringify(simplifiedWords)}
+  --- End Stream ---
   
   Instructions:
-  1. Return a JSON Object with a single key "lines".
-  2. "lines" must be an array of arrays (one array per lyric line).
-  3. Place the aligned word objects into the correct line arrays.
-  4. Preserve the exact "w", "s", "e" values.
-  5. Do not invent words. Use the provided list.
+  1. The "Stream" represents exactly what was sung, in order. You must use EVERY word from the Stream.
+  2. Maintain the exact sequence of the Stream. Do not reorder words.
+  3. Group the words into an array of arrays, where each inner array is a line of text.
+  4. Use the "Original Lyrics" as the primary guide for where to break lines.
+  5. If the audio (Stream) repeats sections (like a chorus repeated twice) which are only written once in the text, you must output the lines multiple times to match the Stream.
+  6. If the audio contains ad-libs not in the text, append them to the nearest logical line or create a new line if significant.
   
-  Expected Output Format: 
-  { "lines": [[{ "w": "Hello", "s": 1.01, "e": 1.50 }, ...], ...] }
+  Output JSON format:
+  { "lines": [[{"w": "word", "s": 1.2, "e": 1.5}, ...], ...] }
   `;
 
   try {
