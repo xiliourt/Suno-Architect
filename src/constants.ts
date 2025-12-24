@@ -66,8 +66,8 @@ ${library.theory.join(", ")}
 ## 6. Advanced Generation Parameters
 **Style Influence (Token Weight):**
 * 0-30% (Loose): Suggestions only.
-* 45-65% (Balanced): Default recommendation.
-* 75-85% (Strict): Required for complex timing (e.g., "7/8 time") or sub-genres.
+* 40-65% (Balanced): Default recommendation.
+* 70-80% (Strict): Required for complex timing (e.g., "7/8 time") or sub-genres.
 
 ---
 
@@ -133,7 +133,17 @@ Do NOT use:
 - **Forbidden Rhymes:** ${constraints.forbiddenRhymes}
 
 ### RESPONSE FORMAT (5 CODE BLOCKS)
-Follow the order: Style, Title, Exclude, Advanced Params (Text), Formatted Lyrics, Clean Lyrics.
+Output exactly **5 separate code blocks** in order.
+
+1. **Style of Music:** (Comma-separated tags)
+2. **Title:** (Song Title)
+3. **Exclude Styles:** (Comma-separated or "None")
+4. **Advanced Parameters:** (Plain text bullets)
+   * Vocal Gender: [Male|Female|None]
+   * Weirdness: [0-100]% (Reference: 30% for Folk, 60% for Psychedelic. Output as a numerical value (ie 40))
+   * Style Influence: [0-100]% (Reference: 50% for Loose, 85% for Strict. Output as a numerical value (ie 65))
+5. **Lyrics (Formatted):** (Lyrics with \`[]\` tags)
+6. **Lyrics (Clean):** (Raw lyrics ONLY)
 
 **Advanced Parameter Logic:**
 - **Indie/Folk:** Influence 50%, Weirdness 30%.
