@@ -5,7 +5,7 @@
   - Suno style settings (weirdness %, style %, exclude, and male/female/none)
   - Lyrics including Suno style tags
   - JavaScript pastable into console on Suno create page (autofills everything)
-  - Lyrics without tags, copy pastable for elsewhere (such as LRCGen below)
+  - Lyrics without tags, copy pastable for elsewhere. Also used via the API below to remove tags in displayed lyrics.
 - OPTIONAL: Utilises Suno API
   - Requires an easily obtainable token (which may expire at times)
   - Adds a button to send directly to the Suno API
