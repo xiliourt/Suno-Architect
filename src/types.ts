@@ -23,6 +23,8 @@ export interface SunoClip {
   title: string;
   created_at: string;
   model_name: string;
+  imageUrl?: string;
+  imageLargeUrl?: string;
   metadata: {
     tags: string;
     prompt: string;
