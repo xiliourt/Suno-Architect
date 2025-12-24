@@ -225,10 +225,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const handleSmartGroup = async () => {
       if (!clipData || !alignment) return;
       
-      const rawLyrics = clipData.originalData?.lyricsAlone || clipData.metadata?.prompt || "";
+      let rawLyrics = clipData.originalData?.lyricsAlone || clipData.metadata?.prompt || "";
+      
+      // Fallback: If no metadata lyrics found (common in manual ID loads), construct from alignment words
+      if (!rawLyrics || rawLyrics.trim() === "") {
+          if (alignment.length > 0) {
+              rawLyrics = alignment.map(w => w.word).join(' ');
+          }
+      }
+
       const cleanLyrics = stripMetaTags(rawLyrics);
 
-      if (!cleanLyrics) {
+      if (!cleanLyrics.trim()) {
           alert("No text lyrics found to group against.");
           return;
       }
