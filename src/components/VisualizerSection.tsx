@@ -33,19 +33,31 @@ interface VisualizerSectionProps {
   apiKey?: string;
 }
 
+const ASPECT_RATIOS = {
+  "16:9": { width: 1280, height: 720, label: "Landscape (16:9)" },
+  "9:16": { width: 720, height: 1280, label: "Portrait/TikTok (9:16)" },
+  "1:1": { width: 1080, height: 1080, label: "Square (1:1)" },
+  "4:3": { width: 1024, height: 768, label: "Classic (4:3)" }
+};
+
 const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCookie, onUpdateClip, apiKey }) => {
   // Selection State
   const [selectedClipId, setSelectedClipId] = useState<string>('');
   const [manualId, setManualId] = useState('');
   
+  // Visual Settings
+  const [aspectRatio, setAspectRatio] = useState<keyof typeof ASPECT_RATIOS>("16:9");
+  const [customBg, setCustomBg] = useState<{ url: string, type: 'image' | 'video', name: string } | null>(null);
+
   // Data State
   const [clipData, setClipData] = useState<SunoClip | null>(null);
   const [alignment, setAlignment] = useState<AlignedWord[] | null>(null);
   const [lines, setLines] = useState<AlignedWord[][]>([]);
   
-  // Audio/Canvas References
+  // Audio/Canvas/Media References
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const customVideoRef = useRef<HTMLVideoElement>(null);
   const requestRef = useRef<number | null>(null);
   
   // Rendering State
@@ -81,7 +93,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
   /**
    * Robust grouping based on timing gaps and character count.
-   * This ensures the visualizer paces with the audio gaps, rather than getting desynced by text mismatch.
    */
   const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
       const cleanAligned = aligned.filter(w => !isMetaWord(w.word));
@@ -180,6 +191,15 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       }
   };
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+        const url = URL.createObjectURL(file);
+        const type = file.type.startsWith('video') ? 'video' : 'image';
+        setCustomBg({ url, type, name: file.name });
+    }
+  };
+
   const handleSmartGroup = async () => {
       if (!clipData || !alignment) return;
       
@@ -208,19 +228,80 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       }
   };
 
+  /**
+   * Helper: Draw image/video covering the canvas (object-cover)
+   */
+  const drawCover = (ctx: CanvasRenderingContext2D, img: CanvasImageSource | HTMLVideoElement | HTMLImageElement, w: number, h: number) => {
+        let imgW = 0;
+        let imgH = 0;
+
+        if (img instanceof HTMLVideoElement) {
+            imgW = img.videoWidth;
+            imgH = img.videoHeight;
+        } else if (img instanceof HTMLImageElement) {
+            imgW = img.naturalWidth || img.width;
+            imgH = img.naturalHeight || img.height;
+        }
+
+        if (!imgW || !imgH) return;
+
+        const imgRatio = imgW / imgH;
+        const winRatio = w / h;
+
+        let drawW, drawH, startX, startY;
+
+        if (imgRatio > winRatio) {
+            // Image is wider than canvas -> crop sides
+            drawH = h;
+            drawW = h * imgRatio;
+            startX = (w - drawW) / 2;
+            startY = 0;
+        } else {
+            // Image is taller than canvas -> crop top/bottom
+            drawW = w;
+            drawH = w / imgRatio;
+            startX = 0;
+            startY = (h - drawH) / 2;
+        }
+        
+        ctx.drawImage(img, startX, startY, drawW, drawH);
+  };
+
   // --- DRAWING LOGIC ---
-  // Extracted to be pure so it can be called by render loop with any time
   const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number) => {
       // 1. Draw Background
       ctx.fillStyle = '#1e1e1e';
       ctx.fillRect(0, 0, width, height);
 
-      const bgImg = document.getElementById('source-img') as HTMLImageElement;
-      if (bgImg && bgImg.complete) {
-          ctx.drawImage(bgImg, 0, 0, width, height);
-          ctx.fillStyle = 'rgba(0,0,0,0.85)'; // Heavy dim
-          ctx.fillRect(0, 0, width, height);
+      let drawn = false;
+
+      // Try Custom Background first
+      if (customBg) {
+          if (customBg.type === 'video' && customVideoRef.current) {
+              // Note: During offline render, the loop logic sets current time manually.
+              // During preview, it just plays.
+              drawCover(ctx, customVideoRef.current, width, height);
+              drawn = true;
+          } else if (customBg.type === 'image') {
+              const customImg = document.getElementById('custom-bg-img') as HTMLImageElement;
+              if (customImg && customImg.complete) {
+                  drawCover(ctx, customImg, width, height);
+                  drawn = true;
+              }
+          }
       }
+
+      // Fallback to Default Suno Cover
+      if (!drawn) {
+        const bgImg = document.getElementById('source-img') as HTMLImageElement;
+        if (bgImg && bgImg.complete) {
+            drawCover(ctx, bgImg, width, height);
+        }
+      }
+
+      // Overlay Dimmer
+      ctx.fillStyle = 'rgba(0,0,0,0.7)'; // Slightly lighter dim than before
+      ctx.fillRect(0, 0, width, height);
 
       // 2. Draw Text
       if (lines.length > 0) {
@@ -238,16 +319,11 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           if (activeLineIdx === -1) {
               const upcomingIdx = lines.findIndex(line => line.length > 0 && line[0].start_s > time);
               if (upcomingIdx !== -1) {
-                  // INTRO LOGIC:
-                  // If we are significantly before the start of the first line (> 4s), 
-                  // don't snap to it yet. Keep screen center empty.
-                  // This fixes the issue where lyrics appear at 0:00 for songs with long intros.
                   const timeToStart = lines[upcomingIdx][0].start_s - time;
-                  
                   if (upcomingIdx === 0 && timeToStart > 4) {
-                       activeLineIdx = -1; // Remain in "Intro" state
+                       activeLineIdx = -1; 
                   } else {
-                       activeLineIdx = upcomingIdx; // Pre-roll: Snap to upcoming line
+                       activeLineIdx = upcomingIdx;
                   }
               } else {
                   activeLineIdx = lines.length - 1;
@@ -255,7 +331,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           }
           
           if (activeLineIdx === -1) {
-               // Render simple intro indicator
                ctx.font = 'italic 24px Inter, sans-serif';
                ctx.fillStyle = 'rgba(255,255,255,0.2)';
                ctx.fillText("...", width / 2, height / 2);
@@ -270,6 +345,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
              const centerY = (height / 2) + offsetY;
              
              let fontSize = 48 * scale;
+             // Adjust font size for vertical video
+             if (aspectRatio === "9:16") fontSize = 36 * scale; 
+
              ctx.font = `bold ${fontSize}px Inter, sans-serif`;
              
              let totalWidth = 0;
@@ -322,13 +400,16 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
              ctx.shadowBlur = 0;
           };
 
+          const spacing = aspectRatio === "9:16" ? 100 : 80;
+
           renderLine(activeLineIdx, 0, 1.2, 1);
-          renderLine(activeLineIdx - 1, -80, 0.8, 0.5);
-          renderLine(activeLineIdx - 2, -140, 0.6, 0.2);
-          renderLine(activeLineIdx + 1, 80, 0.8, 0.5);
-          renderLine(activeLineIdx + 2, 140, 0.6, 0.2);
+          renderLine(activeLineIdx - 1, -spacing, 0.8, 0.5);
+          renderLine(activeLineIdx - 2, -(spacing * 1.8), 0.6, 0.2);
+          renderLine(activeLineIdx + 1, spacing, 0.8, 0.5);
+          renderLine(activeLineIdx + 2, (spacing * 1.8), 0.6, 0.2);
 
       } else if (alignment) {
+          // Fallback if no grouping
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           const cleanAligned = alignment.filter(w => !isMetaWord(w.word));
@@ -362,7 +443,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       ctx.textAlign = 'center';
       ctx.font = 'bold 24px Inter, sans-serif';
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(clipData?.title || "Unknown Track", width / 2, 60);
+      
+      const titleY = aspectRatio === "9:16" ? 120 : 60;
+      ctx.fillText(clipData?.title || "Unknown Track", width / 2, titleY);
 
       if (clipData && audioRef.current && audioRef.current.duration) {
           const pct = time / audioRef.current.duration;
@@ -375,8 +458,15 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const animate = () => {
       const canvas = canvasRef.current;
       const ctx = canvas?.getContext('2d');
+      // Sync video playback during preview
+      if (!isRendering && customBg?.type === 'video' && customVideoRef.current && audioRef.current) {
+         if(!audioRef.current.paused && customVideoRef.current.paused) customVideoRef.current.play();
+         if(audioRef.current.paused && !customVideoRef.current.paused) customVideoRef.current.pause();
+      }
+
       if (!isRendering && audioRef.current && canvas && ctx) {
-          renderFrame(ctx, canvas.width, canvas.height, audioRef.current.currentTime);
+          const dims = ASPECT_RATIOS[aspectRatio];
+          renderFrame(ctx, dims.width, dims.height, audioRef.current.currentTime);
           setProgress(audioRef.current.currentTime);
           requestRef.current = requestAnimationFrame(animate);
       }
@@ -390,12 +480,16 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       return () => {
           if (requestRef.current) cancelAnimationFrame(requestRef.current);
       };
-  }, [selectedClipId, alignment, lines, isRendering]);
+  }, [selectedClipId, alignment, lines, isRendering, aspectRatio, customBg]);
 
   // --- OFFLINE RENDERING LOGIC ---
   const startOfflineRender = async () => {
     if (!clipData || !audioRef.current || !canvasRef.current) return;
     
+    // Pause any preview playback
+    audioRef.current.pause();
+    if(customVideoRef.current) customVideoRef.current.pause();
+
     setIsRendering(true);
     setRenderProgress(0);
 
@@ -414,8 +508,11 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
         const duration = audioBuffer.duration;
 
-        // 2. Setup Muxer with FileSystem Strategy if available
-        const filename = `${clipData.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_offline.webm`;
+        // 2. Output Dimensions from Selection
+        const { width: targetWidth, height: targetHeight } = ASPECT_RATIOS[aspectRatio];
+
+        // 3. Setup Muxer with FileSystem Strategy if available
+        const filename = `${clipData.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${aspectRatio.replace(':','-')}.webm`;
         let muxerTarget: any;
 
         // Try direct disk streaming if browser supports it
@@ -431,7 +528,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 writableStream = await fileHandle.createWritable();
                 muxerTarget = new FileSystemWritableFileStreamTarget(writableStream);
             } catch (err: any) {
-                // If user cancels, stop rendering
                 if (err.name === 'AbortError') {
                     setIsRendering(false);
                     return;
@@ -440,7 +536,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             }
         }
 
-        // Fallback to RAM
         if (!muxerTarget) {
             muxerTarget = new ArrayBufferTarget();
         }
@@ -449,17 +544,17 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             target: muxerTarget,
             video: {
                 codec: 'V_VP9',
-                width: 1280,
-                height: 720
+                width: targetWidth,
+                height: targetHeight
             },
             audio: {
                 codec: 'A_OPUS',
                 numberOfChannels: 2,
-                sampleRate: 48000 // Encoder output rate
+                sampleRate: 48000
             }
         });
 
-        // 3. Setup Video Encoder
+        // 4. Setup Video Encoder
         // @ts-ignore
         const videoEncoder = new VideoEncoder({
             output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
@@ -467,13 +562,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         });
         videoEncoder.configure({
             codec: 'vp09.00.10.08',
-            width: 1280,
-            height: 720,
+            width: targetWidth,
+            height: targetHeight,
             bitrate: 4_000_000, // 4Mbps
             framerate: 30
         });
 
-        // 4. Setup Audio Encoder
+        // 5. Setup Audio Encoder
         // @ts-ignore
         const audioEncoder = new AudioEncoder({
             output: (chunk: any, meta: any) => muxer.addAudioChunk(chunk, meta),
@@ -486,14 +581,16 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             bitrate: 128000
         });
 
-        // 5. Render Video Frames with BACKPRESSURE
+        // 6. Render Video Frames with BACKPRESSURE
         const fps = 30;
         const totalFrames = Math.ceil(duration * fps);
         const ctx = canvasRef.current.getContext('2d')!;
         
+        // Ensure canvas matches target dims for the render pass
+        canvasRef.current.width = targetWidth;
+        canvasRef.current.height = targetHeight;
+
         for (let i = 0; i < totalFrames; i++) {
-            // BACKPRESSURE: If encoder queue is full, wait.
-            // This prevents "Low RAM" crashes by ensuring we don't buffer too many frames in memory.
             if (videoEncoder.encodeQueueSize > 5) {
                 while (videoEncoder.encodeQueueSize > 2) {
                     await new Promise(r => setTimeout(r, 10));
@@ -501,7 +598,28 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             }
 
             const t = i / fps;
-            renderFrame(ctx, 1280, 720, t);
+
+            // Sync Background Video if present
+            if (customBg?.type === 'video' && customVideoRef.current) {
+                const vid = customVideoRef.current;
+                const loopTime = t % vid.duration;
+                // Only seek if difference is significant to avoid stutter or redundant seeks
+                if (Math.abs(vid.currentTime - loopTime) > 0.1) {
+                    vid.currentTime = loopTime;
+                    // Wait for seek to complete to ensure frame is available
+                    await new Promise<void>(resolve => {
+                         const onSeek = () => {
+                             vid.removeEventListener('seeked', onSeek);
+                             resolve();
+                         };
+                         vid.addEventListener('seeked', onSeek);
+                         // Fallback if event doesn't fire immediately (unlikely in robust browser envs but good safety)
+                         // setTimeout(onSeek, 50); 
+                    });
+                }
+            }
+
+            renderFrame(ctx, targetWidth, targetHeight, t);
             
             // @ts-ignore
             const frame = new VideoFrame(canvasRef.current, { timestamp: t * 1000000 });
@@ -516,29 +634,21 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             }
         }
 
-        // 6. Encode Audio
-        // We need to pass data to AudioEncoder as AudioData objects.
-        // We'll chunk the AudioBuffer into smaller pieces (e.g. 1 second)
-        // Note: AudioEncoder expects planar float32 for Opus usually.
-        
-        const numberOfChannels = 2; // Stereo
+        // 7. Encode Audio (Same as before)
+        const numberOfChannels = 2;
         const sourceChannels = audioBuffer.numberOfChannels;
         const audioDataLength = audioBuffer.length;
         const sourceSampleRate = audioBuffer.sampleRate;
         
-        // Helper to mix down or expand channels to stereo
         const getChannelData = (channel: number) => {
              if (channel < sourceChannels) return audioBuffer.getChannelData(channel);
-             // If source is mono, duplicate ch0 for ch1
              return audioBuffer.getChannelData(0);
         };
 
-        const chunkFrames = 48000; // 1 second chunks roughly
+        const chunkFrames = 48000;
         for (let offset = 0; offset < audioDataLength; offset += chunkFrames) {
             const end = Math.min(offset + chunkFrames, audioDataLength);
             const frames = end - offset;
-            
-            // Prepare planar buffer [ch0...][ch1...]
             const data = new Float32Array(frames * numberOfChannels);
             
             for (let ch = 0; ch < numberOfChannels; ch++) {
@@ -561,16 +671,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             audioData.close();
         }
 
-        // 7. Flush Encoders
         await videoEncoder.flush();
         await audioEncoder.flush();
         muxer.finalize();
 
-        // 8. Close Stream or Download
         if (writableStream) {
             await writableStream.close();
         } else {
-            // RAM Fallback: Download the buffer
             const { buffer } = muxer.target;
             const blob = new Blob([buffer], { type: 'video/webm' });
             const url = URL.createObjectURL(blob);
@@ -589,7 +696,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     } finally {
         setIsRendering(false);
         setRenderProgress(0);
-        // Resume Preview loop
         requestRef.current = requestAnimationFrame(animate);
     }
   };
@@ -650,11 +756,97 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                             src={clipData.imageUrl} 
                             alt="Cover" 
                             crossOrigin="anonymous" // CRITICAL FOR CANVAS EXPORT
-                            className="w-full aspect-square object-cover"
+                            className={`w-full aspect-square object-cover ${customBg ? 'hidden' : 'block'}`}
                          />
-                         <div className="p-4">
-                             <h3 className="font-bold text-white text-lg truncate">{clipData.title}</h3>
-                             <p className="text-xs text-slate-400 font-mono mb-4">{clipData.id}</p>
+                         
+                         {/* Hidden Custom Media Elements */}
+                         {customBg?.type === 'image' && (
+                             <img 
+                                id="custom-bg-img"
+                                src={customBg.url}
+                                className="hidden"
+                                crossOrigin="anonymous"
+                                alt="custom-bg"
+                             />
+                         )}
+                         <video 
+                             ref={customVideoRef}
+                             src={customBg?.type === 'video' ? customBg.url : ''}
+                             className="hidden"
+                             crossOrigin="anonymous"
+                             muted
+                             playsInline
+                             loop
+                         />
+
+                         {customBg && (
+                             <div className="w-full h-48 bg-slate-900 flex flex-col items-center justify-center border-b border-slate-700 relative overflow-hidden">
+                                {customBg.type === 'video' ? (
+                                    <div className="text-center p-4">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 mx-auto mb-2 text-purple-400">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5m-3.75-13.5H9m3 0h3.75M9 18.75H5.25m8.25 0h3.75" />
+                                        </svg>
+                                        <span className="text-xs text-white block truncate max-w-[200px]">{customBg.name}</span>
+                                        <span className="text-[10px] text-slate-500 uppercase">Video Background</span>
+                                    </div>
+                                ) : (
+                                    <img src={customBg.url} className="w-full h-full object-cover opacity-80" alt="preview" />
+                                )}
+                                <button 
+                                    onClick={() => setCustomBg(null)}
+                                    className="absolute top-2 right-2 bg-red-600/80 hover:bg-red-600 text-white p-1 rounded-full shadow-lg"
+                                    title="Remove Custom Background"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                        <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                                    </svg>
+                                </button>
+                             </div>
+                         )}
+
+                         <div className="p-4 space-y-4">
+                             <div>
+                                <h3 className="font-bold text-white text-lg truncate">{clipData.title}</h3>
+                                <p className="text-xs text-slate-400 font-mono mb-4">{clipData.id}</p>
+                             </div>
+
+                             {/* Visualizer Settings */}
+                             <div className="space-y-3 bg-slate-900/50 p-3 rounded-lg border border-slate-700/50">
+                                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Visual Settings</h4>
+                                 
+                                 {/* Aspect Ratio Selector */}
+                                 <div>
+                                     <label className="text-xs text-slate-500 block mb-1">Aspect Ratio</label>
+                                     <select 
+                                        value={aspectRatio}
+                                        onChange={(e) => setAspectRatio(e.target.value as keyof typeof ASPECT_RATIOS)}
+                                        className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:ring-1 focus:ring-purple-500"
+                                     >
+                                         {Object.entries(ASPECT_RATIOS).map(([key, val]) => (
+                                             <option key={key} value={key}>{val.label} ({val.width}x{val.height})</option>
+                                         ))}
+                                     </select>
+                                 </div>
+
+                                 {/* File Upload */}
+                                 <div>
+                                     <label className="text-xs text-slate-500 block mb-1">Custom Background</label>
+                                     <label className="flex items-center justify-center w-full px-2 py-2 border border-dashed border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition-colors group">
+                                         <input 
+                                            type="file" 
+                                            accept="image/png, image/jpeg, image/webp, video/mp4, video/webm" 
+                                            className="hidden" 
+                                            onChange={handleFileUpload}
+                                         />
+                                         <div className="flex items-center gap-2 text-slate-400 group-hover:text-white">
+                                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                                 <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                                             </svg>
+                                             <span className="text-xs">Upload Image / Loop</span>
+                                         </div>
+                                     </label>
+                                 </div>
+                             </div>
                              
                              <div className="flex flex-col gap-2">
                                 <div className="flex items-center gap-2">
@@ -754,12 +946,14 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
                  {/* Right: Canvas Preview */}
                  <div className="lg:col-span-2">
-                     <div className="bg-black border border-slate-700 rounded-xl overflow-hidden shadow-2xl relative aspect-video flex items-center justify-center">
+                     <div className="bg-black border border-slate-700 rounded-xl overflow-hidden shadow-2xl relative flex items-center justify-center bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCIgZmlsbD0iIzIyMiI+PHJlY3Qgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiB4PSIwIiB5PSIwIiBmaWxsPSIjMzMzIi8+PHJlY3Qgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiB4PSIxMCIgeT0iMTAiIGZpbGw9IiMzMzMiLz48L3N2Zz4=')]">
                          <canvas 
                             ref={canvasRef}
-                            width={1280}
-                            height={720}
-                            className="w-full h-full object-contain"
+                            // Set actual resolution based on ratio
+                            width={ASPECT_RATIOS[aspectRatio].width}
+                            height={ASPECT_RATIOS[aspectRatio].height}
+                            // Scale via CSS to fit container
+                            className="max-w-full max-h-[70vh] w-auto h-auto object-contain shadow-2xl"
                          />
                          
                          {/* Overlay when preparing */}
@@ -776,7 +970,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                          )}
                      </div>
                      <div className="mt-2 flex justify-between text-xs text-slate-500 font-mono">
-                         <span>1280x720 • 30fps</span>
+                         <span>{ASPECT_RATIOS[aspectRatio].label} • {ASPECT_RATIOS[aspectRatio].width}x{ASPECT_RATIOS[aspectRatio].height} • 30fps</span>
                          <span>{isRendering ? 'RENDERING' : 'PREVIEW'}</span>
                      </div>
                  </div>
