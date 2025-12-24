@@ -5,7 +5,8 @@ import { STRICT_OUTPUT_SUFFIX } from "../constants";
 export const generateSunoPrompt = async (
   userInput: string, 
   customApiKey?: string,
-  systemInstruction?: string
+  systemInstruction?: string,
+  geminiModel: string = "gemini-3-flash-preview"
 ): Promise<ParsedSunoOutput> => {
   const apiKey = customApiKey || process.env.API_KEY;
 
@@ -24,7 +25,7 @@ export const generateSunoPrompt = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: geminiModel,
       contents: userInput,
       config: {
         systemInstruction: finalSystemInstruction,
@@ -171,6 +172,7 @@ function setVocalGender(targetGender) {
             if (isSelected !== shouldBeSelected) { btn.click(); }
         }
     }
+}
 
 
 // --- MAIN EXECUTION ---
