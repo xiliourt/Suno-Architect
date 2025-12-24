@@ -97,6 +97,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   /**
    * Robust grouping based on timing gaps and character count.
    * This creates the "Pseudo-lines" for the AI.
+   * 
+   * UPDATED: Using tighter thresholds to favor over-splitting (smaller chunks)
+   * which are easier for AI to merge than under-splitting.
    */
   const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
       const cleanAligned = aligned.filter(w => !isMetaWord(w.word));
@@ -105,8 +108,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       const groups: AlignedWord[][] = [];
       let currentLine: AlignedWord[] = [];
       
-      const GAP_THRESHOLD = 0.65; // Seconds of silence to trigger new line
-      const MAX_CHARS = 45;       // Max characters per line before soft-wrap
+      const GAP_THRESHOLD = 0.5;  // Reduced from 0.65 to capture tighter pauses
+      const MAX_CHARS = 40;       // Reduced from 45 to break long lines earlier
 
       cleanAligned.forEach((word, idx) => {
           if (idx === 0) {
