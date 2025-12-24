@@ -35,6 +35,16 @@ const App: React.FC = () => {
   const [customApiKey, setCustomApiKey] = useState('');
   const [isKeyValid, setIsKeyValid] = useState(false);
   
+  // Gemini Model State
+  const [geminiModel, setGeminiModel] = useState<string>(() => {
+      return localStorage.getItem('gemini_model') || 'gemini-3-flash-preview';
+  });
+
+  const handleGeminiModelChange = (model: string) => {
+      setGeminiModel(model);
+      localStorage.setItem('gemini_model', model);
+  };
+  
   // Suno Configuration State
   const [isSunoModalOpen, setIsSunoModalOpen] = useState(false);
   const [sunoCookie, setSunoCookie] = useState('');
@@ -243,8 +253,8 @@ const App: React.FC = () => {
   const handleGenerate = async (prompt: string) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null, result: null }));
     try {
-      // Pass the customized system prompt
-      const result = await generateSunoPrompt(prompt, customApiKey, promptSettings.customSystemPrompt);
+      // Pass the customized system prompt and gemini model
+      const result = await generateSunoPrompt(prompt, customApiKey, promptSettings.customSystemPrompt, geminiModel);
       setState({ isLoading: false, error: null, result });
       
       // Auto-save to history as draft
@@ -284,6 +294,8 @@ const App: React.FC = () => {
         sunoCredits={sunoCredits}
         sunoModel={sunoModel}
         onModelChange={handleModelChange}
+        geminiModel={geminiModel}
+        onGeminiModelChange={handleGeminiModelChange}
       />
 
       <SunoSettingsModal 
