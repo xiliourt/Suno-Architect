@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { SunoClip, AlignedWord } from '../types';
 import { getLyricAlignment } from '../services/sunoApi';
 import { groupLyricsByLines } from '../services/geminiService';
+// @ts-ignore
+import { Muxer, ArrayBufferTarget } from 'webm-muxer';
 
 interface VisualizerSectionProps {
   history: SunoClip[];
@@ -9,22 +11,6 @@ interface VisualizerSectionProps {
   onUpdateClip: (id: string, updates: Partial<SunoClip>) => void;
   apiKey?: string;
 }
-
-// Worker code as a string to avoid external file dependencies for this component
-const TIMER_WORKER_BLOB = new Blob([`
-  let intervalId = null;
-  self.onmessage = function(e) {
-    if (e.data === 'start') {
-      // Target ~30 FPS
-      intervalId = setInterval(() => {
-        self.postMessage('tick');
-      }, 33);
-    } else if (e.data === 'stop') {
-      if (intervalId) clearInterval(intervalId);
-      intervalId = null;
-    }
-  };
-`], { type: 'application/javascript' });
 
 const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCookie, onUpdateClip, apiKey }) => {
   // Selection State
@@ -40,20 +26,15 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const requestRef = useRef<number | null>(null);
-  const workerRef = useRef<Worker | null>(null);
   
-  // Recording State
-  const [isRecording, setIsRecording] = useState(false);
+  // Rendering State
+  const [isRendering, setIsRendering] = useState(false);
+  const [renderProgress, setRenderProgress] = useState(0);
   const [isPreparing, setIsPreparing] = useState(false);
   const [isGrouping, setIsGrouping] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [progress, setProgress] = useState(0); // Playback progress
   
-  // Media Recorder Refs
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const destinationNodeRef = useRef<MediaStreamAudioDestinationNode | null>(null);
 
   /**
    * Helper: Check if a word is a meta tag (contains brackets).
@@ -86,22 +67,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       const cleanText = stripMetaTags(textLyrics);
       const textLines = cleanText.split('\n');
       
-      // Filter out any aligned words that look like meta tags from the grouping logic
       const cleanAligned = aligned.filter(w => !isMetaWord(w.word));
       
       const groups: AlignedWord[][] = [];
       let wordIdx = 0;
 
       for (const line of textLines) {
-          // Count "meaningful" words (ignore purely punctuation tokens which usually aren't aligned)
-          // This improves sync when text has " - " or "..." that audio alignment ignores
           const wordsInLine = line.split(/\s+/).filter(w => /[a-zA-Z0-9\u00C0-\u00FF]/.test(w)).length;
           
           if (wordsInLine === 0) continue;
 
           const matchedWords: AlignedWord[] = [];
           
-          // Consume N words from the aligned stream
           for (let i = 0; i < wordsInLine; i++) {
               if (wordIdx >= cleanAligned.length) break;
               matchedWords.push(cleanAligned[wordIdx]);
@@ -110,7 +87,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           if (matchedWords.length > 0) groups.push(matchedWords);
       }
       
-      // Dump remaining words into chunks if the text lyrics were shorter than audio lyrics
       if (wordIdx < cleanAligned.length) {
           const remainder = cleanAligned.slice(wordIdx);
           const chunkSize = 6;
@@ -137,18 +113,15 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         
         if (fromHistory.alignmentData) {
             setAlignment(fromHistory.alignmentData);
-            // Attempt simple grouping immediately
             const simpleLines = simpleLineGroup(rawLyrics, fromHistory.alignmentData);
             setLines(simpleLines);
         } else if (sunoCookie && !fromHistory.id.startsWith('draft_')) {
-             // Fetch alignment if missing
              setIsPreparing(true);
              getLyricAlignment(fromHistory.id, sunoCookie)
                 .then(res => {
                     if(res && res.aligned_words) {
                         setAlignment(res.aligned_words);
                         onUpdateClip(fromHistory.id, { alignmentData: res.aligned_words });
-                        // Try simple grouping on fetch
                         const simpleLines = simpleLineGroup(rawLyrics, res.aligned_words);
                         setLines(simpleLines);
                     }
@@ -157,7 +130,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 .finally(() => setIsPreparing(false));
         }
     } else {
-        // Construct faux clip from ID (Manual Entry)
         setClipData({
             id: selectedClipId,
             title: 'Suno Track',
@@ -167,7 +139,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             metadata: { tags: '', prompt: '' }
         });
         
-        // Fetch alignment for manual ID
         if (sunoCookie) {
              setIsPreparing(true);
              getLyricAlignment(selectedClipId, sunoCookie)
@@ -199,10 +170,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       
       setIsGrouping(true);
       try {
-          // Filter out brackets before sending to AI to prevent confusion
           const cleanAligned = alignment.filter(w => !isMetaWord(w.word));
-          
-          // Pass clean lyrics to Gemini so it doesn't get confused by [Verse] tags
           const grouped = await groupLyricsByLines(cleanLyrics, cleanAligned, apiKey);
           if (grouped && grouped.length > 0) {
               setLines(grouped);
@@ -218,14 +186,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   };
 
   // --- DRAWING LOGIC ---
-  const drawCanvas = (time: number) => {
-      const canvas = canvasRef.current;
-      const ctx = canvas?.getContext('2d');
-      if (!canvas || !ctx || !clipData) return;
-
-      const width = canvas.width;
-      const height = canvas.height;
-
+  // Extracted to be pure so it can be called by render loop with any time
+  const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number) => {
       // 1. Draw Background
       ctx.fillStyle = '#1e1e1e';
       ctx.fillRect(0, 0, width, height);
@@ -237,7 +199,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           ctx.fillRect(0, 0, width, height);
       }
 
-      // 2. Draw Text (Lines)
+      // 2. Draw Text
       if (lines.length > 0) {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -250,14 +212,11 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
              return time >= start && time <= end;
           });
 
-          // Fallback: If in a gap, show the NEXT upcoming line
           if (activeLineIdx === -1) {
-              // Find first line that starts after current time
               const upcomingIdx = lines.findIndex(line => line.length > 0 && line[0].start_s > time);
               if (upcomingIdx !== -1) {
                   activeLineIdx = upcomingIdx;
               } else {
-                  // Past the end of all lines, show the last one
                   activeLineIdx = lines.length - 1;
               }
           }
@@ -265,18 +224,14 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           const renderLine = (lineIdx: number, offsetY: number, scale: number, alpha: number) => {
              if (lineIdx < 0 || lineIdx >= lines.length) return;
              const line = lines[lineIdx];
-             
-             // VISUAL FILTER: Remove any words with brackets
              const displayWords = line.filter(w => !isMetaWord(w.word));
              if (displayWords.length === 0) return;
 
              const centerY = (height / 2) + offsetY;
              
-             // Dynamic Font Scaling to fit line length
              let fontSize = 48 * scale;
              ctx.font = `bold ${fontSize}px Inter, sans-serif`;
              
-             // First Pass: Measure total width
              let totalWidth = 0;
              const measurements = displayWords.map(w => {
                  const m = ctx.measureText(w.word + " ");
@@ -284,13 +239,11 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                  return m.width;
              });
              
-             // Scale down if line is too wide
              const maxW = width * 0.9;
              if (totalWidth > maxW) {
                  const ratio = maxW / totalWidth;
                  fontSize *= ratio;
                  ctx.font = `bold ${fontSize}px Inter, sans-serif`;
-                 // Re-measure with new font size
                  totalWidth = 0;
                  measurements.forEach((_, i) => {
                      const m = ctx.measureText(displayWords[i].word + " ");
@@ -301,25 +254,24 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
              
              let currentX = (width - totalWidth) / 2;
 
-             // Second Pass: Draw words
              displayWords.forEach((w, i) => {
                  const isWordActive = time >= w.start_s && time <= w.end_s;
                  const isWordPast = time > w.end_s;
                  
                  if (lineIdx === activeLineIdx) {
                     if (isWordActive) {
-                        ctx.fillStyle = '#e879f9'; // Bright Pink/Purple for active word
-                        ctx.shadowColor = '#d946ef'; // Strong glow
+                        ctx.fillStyle = '#e879f9'; 
+                        ctx.shadowColor = '#d946ef'; 
                         ctx.shadowBlur = 25;
                     } else if (isWordPast) {
-                        ctx.fillStyle = '#f1f5f9'; // White/Slate (sung)
+                        ctx.fillStyle = '#f1f5f9'; 
                         ctx.shadowBlur = 0;
                     } else {
-                        ctx.fillStyle = 'rgba(255,255,255,0.3)'; // Dim (future)
+                        ctx.fillStyle = 'rgba(255,255,255,0.3)'; 
                         ctx.shadowBlur = 0;
                     }
                  } else {
-                     ctx.fillStyle = `rgba(255,255,255,${alpha})`; // Inactive line
+                     ctx.fillStyle = `rgba(255,255,255,${alpha})`;
                      ctx.shadowBlur = 0;
                  }
                  
@@ -327,28 +279,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                  ctx.fillText(w.word, currentX, centerY);
                  currentX += measurements[i];
              });
-             
-             // Reset Shadow
              ctx.shadowBlur = 0;
           };
 
-          // Render Active Line (Center)
           renderLine(activeLineIdx, 0, 1.2, 1);
-          
-          // Render Previous Lines (fading up/out)
           renderLine(activeLineIdx - 1, -80, 0.8, 0.5);
           renderLine(activeLineIdx - 2, -140, 0.6, 0.2);
-          
-          // Render Next Lines (fading down/in)
           renderLine(activeLineIdx + 1, 80, 0.8, 0.5);
           renderLine(activeLineIdx + 2, 140, 0.6, 0.2);
 
       } else if (alignment) {
-          // Fallback to Teleprompter view
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          
-          // VISUAL FILTER: Remove any words with brackets
           const cleanAligned = alignment.filter(w => !isMetaWord(w.word));
 
           const activeIndex = cleanAligned.findIndex(w => time >= w.start_s && time <= w.end_s);
@@ -376,141 +318,192 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           ctx.shadowBlur = 0;
       }
 
-      // Title & Progress
+      // Title & Progress Bar
       ctx.textAlign = 'center';
       ctx.font = 'bold 24px Inter, sans-serif';
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(clipData.title || "Unknown Track", width / 2, 60);
+      ctx.fillText(clipData?.title || "Unknown Track", width / 2, 60);
 
-      const audio = audioRef.current;
-      if (audio && audio.duration) {
-          const pct = time / audio.duration;
+      if (clipData && audioRef.current && audioRef.current.duration) {
+          const pct = time / audioRef.current.duration;
           ctx.fillStyle = '#a855f7';
           ctx.fillRect(0, height - 8, width * pct, 8);
       }
   };
 
-  // Animation Loop (Standard RAF for preview)
+  // Preview Loop
   const animate = () => {
-      // Only run RAF loop if NOT recording. 
-      // During recording, the worker drives the draw calls to ensure background processing.
-      if (!isRecording && audioRef.current) {
-          drawCanvas(audioRef.current.currentTime);
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext('2d');
+      if (!isRendering && audioRef.current && canvas && ctx) {
+          renderFrame(ctx, canvas.width, canvas.height, audioRef.current.currentTime);
           setProgress(audioRef.current.currentTime);
           requestRef.current = requestAnimationFrame(animate);
       }
   };
 
   useEffect(() => {
-      if (selectedClipId && !isRecording) {
+      if (selectedClipId && !isRendering) {
           if (requestRef.current) cancelAnimationFrame(requestRef.current);
           requestRef.current = requestAnimationFrame(animate);
       }
       return () => {
           if (requestRef.current) cancelAnimationFrame(requestRef.current);
       };
-  }, [selectedClipId, alignment, lines, isRecording]);
+  }, [selectedClipId, alignment, lines, isRendering]);
 
-  // --- RECORDING LOGIC ---
-  const startRecording = async () => {
-      const canvas = canvasRef.current;
-      const audio = audioRef.current;
-      if (!canvas || !audio || !clipData) return;
-      
-      setIsRecording(true);
-      recordedChunksRef.current = [];
+  // --- OFFLINE RENDERING LOGIC ---
+  const startOfflineRender = async () => {
+    if (!clipData || !audioRef.current || !canvasRef.current) return;
+    
+    setIsRendering(true);
+    setRenderProgress(0);
 
-      try {
-          if (!audioContextRef.current) {
-               audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-          }
-          const actx = audioContextRef.current;
-          await actx.resume(); // Ensure context is running
-          
-          if (!sourceNodeRef.current) {
-              sourceNodeRef.current = actx.createMediaElementSource(audio);
-              destinationNodeRef.current = actx.createMediaStreamDestination();
-              sourceNodeRef.current.connect(destinationNodeRef.current);
-              sourceNodeRef.current.connect(actx.destination);
-          }
+    try {
+        // 1. Fetch & Decode Audio
+        const audioSrc = audioRef.current.src;
+        const response = await fetch(audioSrc);
+        const arrayBuffer = await response.arrayBuffer();
+        
+        if (!audioContextRef.current) {
+            audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        }
+        const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+        const duration = audioBuffer.duration;
 
-          const canvasStream = canvas.captureStream(30); 
-          const audioStream = destinationNodeRef.current!.stream;
-          const combinedStream = new MediaStream([...canvasStream.getVideoTracks(), ...audioStream.getAudioTracks()]);
+        // 2. Setup Muxer
+        const muxer = new Muxer({
+            target: new ArrayBufferTarget(),
+            video: {
+                codec: 'V_VP9',
+                width: 1280,
+                height: 720
+            },
+            audio: {
+                codec: 'A_OPUS',
+                numberOfChannels: 2,
+                sampleRate: 48000 // Encoder output rate
+            }
+        });
 
-          const options = { mimeType: 'video/webm; codecs=vp9' };
-          const recorder = new MediaRecorder(combinedStream, MediaRecorder.isTypeSupported(options.mimeType) ? options : undefined);
-          
-          recorder.ondataavailable = (e) => {
-              if (e.data.size > 0) recordedChunksRef.current.push(e.data);
-          };
+        // 3. Setup Video Encoder
+        const videoEncoder = new VideoEncoder({
+            output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+            error: (e) => console.error("Video Encoder error", e)
+        });
+        videoEncoder.configure({
+            codec: 'vp09.00.10.08',
+            width: 1280,
+            height: 720,
+            bitrate: 4_000_000, // 4Mbps
+            framerate: 30
+        });
 
-          recorder.onstop = () => {
-              const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `${clipData.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_lyric_video.webm`;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              setIsRecording(false);
-              
-              // Stop Worker
-              if (workerRef.current) {
-                  workerRef.current.postMessage('stop');
-                  workerRef.current.terminate();
-                  workerRef.current = null;
-              }
-              
-              // Resume RAF loop
-              requestRef.current = requestAnimationFrame(animate);
-          };
+        // 4. Setup Audio Encoder
+        const audioEncoder = new AudioEncoder({
+            output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+            error: (e) => console.error("Audio Encoder error", e)
+        });
+        audioEncoder.configure({
+            codec: 'opus',
+            numberOfChannels: 2,
+            sampleRate: 48000,
+            bitrate: 128000
+        });
 
-          mediaRecorderRef.current = recorder;
-          
-          // Stop RAF loop to avoid conflict
-          if (requestRef.current) cancelAnimationFrame(requestRef.current);
+        // 5. Render Video Frames
+        const fps = 30;
+        const totalFrames = Math.ceil(duration * fps);
+        const ctx = canvasRef.current.getContext('2d')!;
+        
+        for (let i = 0; i < totalFrames; i++) {
+            const t = i / fps;
+            renderFrame(ctx, 1280, 720, t);
+            
+            // Create frame from canvas
+            // timestamp in microseconds
+            const frame = new VideoFrame(canvasRef.current, { timestamp: t * 1000000 });
+            
+            videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+            frame.close();
 
-          // Start Web Worker for Background Timing
-          const workerUrl = URL.createObjectURL(TIMER_WORKER_BLOB);
-          workerRef.current = new Worker(workerUrl);
-          
-          workerRef.current.onmessage = (e) => {
-              if (e.data === 'tick' && audioRef.current) {
-                  // Drive canvas update from worker tick
-                  drawCanvas(audioRef.current.currentTime);
-                  setProgress(audioRef.current.currentTime);
-              }
-          };
+            // Yield to UI periodically
+            if (i % 30 === 0) {
+                setRenderProgress((i / totalFrames) * 100);
+                await new Promise(r => setTimeout(r, 0));
+            }
+        }
 
-          audio.currentTime = 0;
-          await audio.play();
-          
-          workerRef.current.postMessage('start');
-          recorder.start();
+        // 6. Encode Audio
+        // We need to pass data to AudioEncoder as AudioData objects.
+        // We'll chunk the AudioBuffer into smaller pieces (e.g. 1 second)
+        // Note: AudioEncoder expects planar float32 for Opus usually.
+        
+        const numberOfChannels = 2; // Stereo
+        const sourceChannels = audioBuffer.numberOfChannels;
+        const audioDataLength = audioBuffer.length;
+        const sourceSampleRate = audioBuffer.sampleRate;
+        
+        // Helper to mix down or expand channels to stereo
+        const getChannelData = (channel: number) => {
+             if (channel < sourceChannels) return audioBuffer.getChannelData(channel);
+             // If source is mono, duplicate ch0 for ch1
+             return audioBuffer.getChannelData(0);
+        };
 
-          audio.onended = () => {
-              if (recorder.state !== 'inactive') recorder.stop();
-          };
+        const chunkFrames = 48000; // 1 second chunks roughly
+        for (let offset = 0; offset < audioDataLength; offset += chunkFrames) {
+            const end = Math.min(offset + chunkFrames, audioDataLength);
+            const frames = end - offset;
+            
+            // Prepare planar buffer [ch0...][ch1...]
+            const data = new Float32Array(frames * numberOfChannels);
+            
+            for (let ch = 0; ch < numberOfChannels; ch++) {
+                const srcData = getChannelData(ch);
+                const chunkData = srcData.subarray(offset, end);
+                data.set(chunkData, ch * frames);
+            }
 
-      } catch (e) {
-          console.error("Recording failed", e);
-          setIsRecording(false);
-          alert("Recording failed. Please ensure you have interacted with the page explicitly.");
-      }
-  };
+            const audioData = new AudioData({
+                format: 'f32-planar',
+                sampleRate: sourceSampleRate,
+                numberOfFrames: frames,
+                numberOfChannels: numberOfChannels,
+                timestamp: (offset / sourceSampleRate) * 1000000,
+                data: data
+            });
 
-  const stopRecording = () => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-          mediaRecorderRef.current.stop();
-      }
-      if (audioRef.current) {
-          audioRef.current.pause();
-      }
-      if (workerRef.current) {
-          workerRef.current.postMessage('stop');
-      }
+            audioEncoder.encode(audioData);
+            audioData.close();
+        }
+
+        // 7. Flush Encoders
+        await videoEncoder.flush();
+        await audioEncoder.flush();
+        muxer.finalize();
+
+        // 8. Download
+        const { buffer } = muxer.target;
+        const blob = new Blob([buffer], { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${clipData.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_offline.webm`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+    } catch (e) {
+        console.error("Offline render failed", e);
+        alert("Render failed. Your browser might not support WebCodecs or there was a data error.");
+    } finally {
+        setIsRendering(false);
+        setRenderProgress(0);
+        // Resume Preview loop
+        requestRef.current = requestAnimationFrame(animate);
+    }
   };
 
 
@@ -522,7 +515,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                  <div>
                     <h2 className="text-2xl font-bold text-white mb-1">Lyric Video Visualizer</h2>
-                    <p className="text-sm text-slate-400">Generate a .webm lyric video from any Suno track ID.</p>
+                    <p className="text-sm text-slate-400">Generate a high-quality WebM lyric video (Offline Render).</p>
                  </div>
                  
                  <div className="flex gap-2 w-full md:w-auto">
@@ -586,9 +579,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                 {alignment && (
                                      <button 
                                         onClick={handleSmartGroup}
-                                        disabled={isGrouping}
-                                        className="mt-2 w-full py-2 bg-slate-700 hover:bg-purple-600 text-white text-xs font-bold rounded transition-colors flex items-center justify-center gap-2"
-                                        title="Use AI to group words into lines"
+                                        disabled={isGrouping || isRendering}
+                                        className="mt-2 w-full py-2 bg-slate-700 hover:bg-purple-600 text-white text-xs font-bold rounded transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                                      >
                                          {isGrouping ? (
                                              <svg className="animate-spin h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -635,31 +627,38 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
                      {/* Action Button */}
                      <button
-                        onClick={isRecording ? stopRecording : startRecording}
-                        disabled={isPreparing || !alignment}
+                        onClick={startOfflineRender}
+                        disabled={isPreparing || !alignment || isRendering}
                         className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg transition-all flex items-center justify-center gap-2
-                        ${isRecording 
-                            ? 'bg-red-600 hover:bg-red-500 text-white animate-pulse' 
+                        ${isRendering 
+                            ? 'bg-purple-800 text-white cursor-wait' 
                             : !alignment 
                                 ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
                                 : 'bg-purple-600 hover:bg-purple-500 text-white'
                         }`}
                      >
-                         {isRecording ? (
+                         {isRendering ? (
                              <>
-                                <span className="w-3 h-3 bg-white rounded-sm"></span>
-                                Stop Recording
+                                <span className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></span>
+                                Rendering {Math.round(renderProgress)}%
                              </>
                          ) : (
                              <>
-                                <span className="w-3 h-3 bg-white rounded-full"></span>
-                                Render Video (.webm)
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                                    <path d="M11.25 4.533A9.707 9.707 0 006 3a9.735 9.735 0 00-3.25.555.75.75 0 00-.5.707v14.25a.75.75 0 001 .707A8.237 8.237 0 016 18.75c1.995 0 3.823.707 5.25 1.886V4.533zM12.75 20.636A8.214 8.214 0 0118 18.75c.966 0 1.89.166 2.75.47a.75.75 0 001-.708V4.262a.75.75 0 00-.5-.707A9.735 9.735 0 0018 3a9.707 9.707 0 00-5.25 1.533v16.103z" />
+                                </svg>
+                                Fast Export (.webm)
                              </>
                          )}
                      </button>
-                     {isRecording && (
+                     {isRendering && (
+                         <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden mt-2">
+                             <div className="bg-purple-500 h-full transition-all duration-300" style={{ width: `${renderProgress}%` }}></div>
+                         </div>
+                     )}
+                     {!isRendering && (
                          <p className="text-xs text-center text-slate-400">
-                             Recording in background... you can switch tabs.
+                             Renders at ~10x real-time speed using WebCodecs.
                          </p>
                      )}
                  </div>
@@ -689,7 +688,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                      </div>
                      <div className="mt-2 flex justify-between text-xs text-slate-500 font-mono">
                          <span>1280x720 • 30fps</span>
-                         <span>{isRecording ? 'REC' : 'PREVIEW'}</span>
+                         <span>{isRendering ? 'RENDERING' : 'PREVIEW'}</span>
                      </div>
                  </div>
              </div>
