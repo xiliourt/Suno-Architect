@@ -55,6 +55,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const [clipData, setClipData] = useState<SunoClip | null>(null);
   const [alignment, setAlignment] = useState<AlignedWord[] | null>(null);
   const [lines, setLines] = useState<AlignedWord[][]>([]);
+  const [lyricSource, setLyricSource] = useState(''); // Text source for structure
   
   // Audio/Canvas/Media References
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -73,19 +74,52 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
   /**
    * Helper: Check if a word is a meta tag (contains brackets).
+   * Kept for legacy compatibility, but getCleanAlignedWords is preferred.
    */
   const isMetaWord = (word: string) => {
     return word.includes('[') || word.includes(']');
   };
 
   /**
+   * Enhanced Helper: Filter out meta words, handling split tags across multiple tokens.
+   * E.g. "0:22 [Intro] [" -> "0:23 Downtempo" -> "0:24 ]"
+   */
+  const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
+      const clean: AlignedWord[] = [];
+      let depth = 0;
+
+      for (const w of aligned) {
+          const word = w.word;
+          const openCount = (word.match(/\[/g) || []).length;
+          const closeCount = (word.match(/\]/g) || []).length;
+          
+          // If we were already inside a tag
+          const startedInside = depth > 0;
+          
+          depth += openCount;
+          depth -= closeCount;
+          
+          // If we are still inside a tag
+          const endedInside = depth > 0;
+          
+          // If we were inside, are now inside, or this specific word triggered a tag boundary
+          // We filter it out to avoid showing things like "Intro", "Chorus", "]"
+          if (startedInside || endedInside || openCount > 0 || closeCount > 0) {
+              continue;
+          }
+          
+          clean.push(w);
+      }
+      return clean;
+  };
+
+  /**
    * Helper: Remove [Meta Tags] and empty lines from text to get clean lyrics.
-   * Completely removes [] blocks including content.
    */
   const stripMetaTags = (text: string): string => {
       if (!text) return "";
       return text
-          .replace(/\[[\s\S]*?\]/g, '') // Remove [Verse], [Chorus] and contents completely, including multiline
+          .replace(/\[[\s\S]*?\]/g, '') // Remove [Verse], [Chorus]
           .replace(/\([\s\S]*?\)/g, '') // Remove (Ad-libs)
           .replace(/\{[\s\S]*?\}/g, '') // Remove {Tags}
           .split('\n')
@@ -96,12 +130,17 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
   /**
    * Algorithm: Match Aligned Words to Prompt Structure.
-   * This uses the original lyrics (prompt) as the source of truth for line breaks.
+   * This uses the "Lyric Source" textbox as the source of truth for line breaks.
    */
   const matchWordsToPrompt = (aligned: AlignedWord[], promptText: string): AlignedWord[][] => {
-      const cleanAligned = aligned.filter(w => !isMetaWord(w.word));
+      // Step 1: Clean the aligned words using robust depth check
+      const cleanAligned = getCleanAlignedWords(aligned);
       if (cleanAligned.length === 0) return [];
 
+      // Step 2: Prepare Prompt Lines (Structure Source)
+      // We do NOT strictly strip meta tags here because if the user typed them in the box, 
+      // they might want them (though usually we map words). 
+      // However, we need to strip them to match the content of the audio (which doesn't speak "Verse").
       const promptLines = stripMetaTags(promptText)
           .split('\n')
           .map(l => l.trim())
@@ -109,8 +148,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       
       if (promptLines.length === 0) return groupWordsByTiming(cleanAligned);
 
-      // 1. Tokenize the prompt into a flat list, but remember which line index each token belongs to.
-      // We normalize text for matching (lowercase, no punctuation).
+      // Step 3: Tokenize the prompt
       type PromptToken = { text: string; lineIndex: number };
       const tokens: PromptToken[] = [];
       
@@ -129,33 +167,30 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           const cleanWord = wordObj.word.toLowerCase().replace(/[^\w\s]|_/g, "");
 
           if (!cleanWord) {
-              // If word is just punctuation, just add it to current group
               currentGroup.push(wordObj);
               continue;
           }
 
-          // Try to match with current or next few tokens
-          // (Simple greedy lookahead to handle skipped words/ad-libs)
           let matchFound = false;
           let lookahead = 0;
-          const MAX_LOOKAHEAD = 3;
+          const MAX_LOOKAHEAD = 5; // Increased lookahead
 
           while (tokenPtr + lookahead < tokens.length && lookahead < MAX_LOOKAHEAD) {
               const target = tokens[tokenPtr + lookahead];
               
-              // Fuzzy match: exact or contains
               if (target.text === cleanWord || target.text.includes(cleanWord) || cleanWord.includes(target.text)) {
                   
-                  // FOUND MATCH
-                  // Check if this token belongs to a NEW line
+                  // If we jumped to a new line index, push old group
                   if (target.lineIndex > currentLineIndex) {
-                      // Push current group and start new one
                       if (currentGroup.length > 0) groups.push(currentGroup);
                       currentGroup = [];
+                      
+                      // Handle skipped empty lines in prompt (if any)
+                      // Ideally we'd insert empty groups but visualizer skips them anyway
+                      
                       currentLineIndex = target.lineIndex;
                   }
 
-                  // Advance main token pointer past this match
                   tokenPtr += lookahead + 1;
                   matchFound = true;
                   break; 
@@ -163,7 +198,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               lookahead++;
           }
 
-          // Always add the word to the current group (whether matched or ad-lib/mismatch)
           currentGroup.push(wordObj);
       }
 
@@ -176,7 +210,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
    * Robust grouping based on timing gaps (Fallback).
    */
   const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
-      const cleanAligned = aligned.filter(w => !isMetaWord(w.word));
+      const cleanAligned = getCleanAlignedWords(aligned); // Use new cleaner
       if (cleanAligned.length === 0) return [];
 
       const groups: AlignedWord[][] = [];
@@ -216,37 +250,38 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   useEffect(() => {
     if (!clipData) return;
 
-    // Prefer large image, then standard, then constructed
     let url = clipData.imageLargeUrl || clipData.imageUrl || `https://cdn2.suno.ai/image_large_${clipData.id}.jpeg`;
-    
-    // Add cache buster if it's a Suno URL to prevent CORS errors from cached opaque responses
     if (url.includes('suno.ai') && !url.includes('?')) {
         url += `?t=${Date.now()}`;
     }
-    
     setImgSrc(url);
+    
+    // Set Lyric Source from clip data if empty
+    if (!lyricSource) {
+        const raw = clipData.originalData?.lyricsAlone || clipData.metadata?.prompt || "";
+        setLyricSource(raw);
+    }
   }, [clipData]);
 
   const handleImageError = () => {
-      // Fallback placeholder
       setImgSrc('https://placehold.co/1080x1080/1e293b/475569?text=No+Cover');
   };
 
   // Load Clip Data when ID changes
   useEffect(() => {
     if (!selectedClipId) return;
-    setLines([]); // Reset lines on change
+    setLines([]); 
 
-    // Check history first
     const fromHistory = history.find(c => c.id === selectedClipId);
     if (fromHistory) {
         setClipData(fromHistory);
-        
+        // Reset Lyric Source for new song
+        const rawLyrics = fromHistory.originalData?.lyricsAlone || fromHistory.metadata?.prompt || "";
+        setLyricSource(rawLyrics);
+
         if (fromHistory.alignmentData) {
             setAlignment(fromHistory.alignmentData);
             
-            // INITIAL DEFAULT: Try to use prompt if available, else timing
-            const rawLyrics = fromHistory.originalData?.lyricsAlone || fromHistory.metadata?.prompt || "";
             let autoLines;
             if (rawLyrics) {
                 autoLines = matchWordsToPrompt(fromHistory.alignmentData, rawLyrics);
@@ -263,8 +298,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                         setAlignment(res.aligned_words);
                         onUpdateClip(fromHistory.id, { alignmentData: res.aligned_words });
                         
-                        // Try prompt match first
-                        const rawLyrics = fromHistory.originalData?.lyricsAlone || fromHistory.metadata?.prompt || "";
                         let autoLines;
                         if(rawLyrics) {
                              autoLines = matchWordsToPrompt(res.aligned_words, rawLyrics);
@@ -280,12 +313,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     } else {
         setClipData({
             id: selectedClipId,
-            title: '', // Removed default 'Suno Track' branding
+            title: '', 
             created_at: new Date().toISOString(),
             model_name: 'Unknown',
             imageUrl: `https://cdn2.suno.ai/image_large_${selectedClipId}.jpeg`,
             metadata: { tags: '', prompt: '' }
         });
+        setLyricSource(""); // Reset for manual ID
         
         if (sunoCookie) {
              setIsPreparing(true);
@@ -314,19 +348,17 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     }
   };
 
+  const handleApplyLyrics = () => {
+    if(!alignment) return;
+    // Use the current lyricSource as the authority
+    const newLines = matchWordsToPrompt(alignment, lyricSource);
+    setLines(newLines);
+  };
+
   const handleSmartGroup = async () => {
       if (!clipData || !alignment) return;
       
-      let rawLyrics = clipData.originalData?.lyricsAlone || clipData.metadata?.prompt || "";
-      
-      // Fallback: If no metadata lyrics found (common in manual ID loads), construct from alignment words
-      if (!rawLyrics || rawLyrics.trim() === "") {
-          if (alignment.length > 0) {
-              rawLyrics = alignment.map(w => w.word).join(' ');
-          }
-      }
-
-      const cleanLyrics = stripMetaTags(rawLyrics);
+      const cleanLyrics = stripMetaTags(lyricSource);
 
       if (!cleanLyrics.trim()) {
           alert("No text lyrics found to group against.");
@@ -335,16 +367,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       
       setIsGrouping(true);
       try {
-          const cleanAligned = alignment.filter(w => !isMetaWord(w.word));
+          const cleanAligned = getCleanAlignedWords(alignment);
           
-          // 1. JS Heuristics: Generate "Pseudo-lines" based on PROMPT STRUCTURE first
-          // This ensures the visualizer looks correct immediately based on the prompt's line breaks.
-          const pseudoLines = matchWordsToPrompt(cleanAligned, cleanLyrics);
-          
-          // Show JS preview immediately while AI thinks
+          // 1. JS Heuristics
+          const pseudoLines = matchWordsToPrompt(alignment, lyricSource);
           setLines(pseudoLines);
 
-          // 2. Gemini Refinement: Pass pseudo-lines as a hint to the AI
+          // 2. Gemini Refinement
           const grouped = await groupLyricsByLines(cleanLyrics, cleanAligned, apiKey, geminiModel, pseudoLines);
           
           if (grouped && grouped.length > 0) {
@@ -354,7 +383,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           }
       } catch (e) {
           console.error(e);
-          // Alert user but they still have the JS lines visible
           alert("Failed to group lines with AI. Kept prompt-based grouping.");
       } finally {
           setIsGrouping(false);
@@ -473,6 +501,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           const measureLine = (idx: number, scale: number) => {
               if (idx < 0 || idx >= lines.length) return null;
               const line = lines[idx];
+              // Use getCleanAlignedWords logic implicitly or filter meta words for display
+              // For display, we can use simple check, as robust filtering was done during grouping
               const displayWords = line.filter(w => !isMetaWord(w.word));
               if (displayWords.length === 0) return null;
 
@@ -596,7 +626,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           // Fallback if no grouping
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          const cleanAligned = alignment.filter(w => !isMetaWord(w.word));
+          const cleanAligned = getCleanAlignedWords(alignment);
 
           const activeIndex = cleanAligned.findIndex(w => time >= w.start_s && time <= w.end_s);
           const upcomingIndex = cleanAligned.findIndex(w => w.start_s > time);
@@ -935,79 +965,98 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                  
                  {/* Left: Controls & Info */}
                  <div className="lg:col-span-1 space-y-6">
-                     {/* Metadata Card */}
+                     
+                     {/* Metadata / Lyric Source Card */}
                      <div className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 shadow-lg">
-                         <img 
-                            id="source-img"
-                            src={imgSrc} 
-                            alt="Cover" 
-                            crossOrigin="anonymous" // CRITICAL FOR CANVAS EXPORT
-                            onError={handleImageError}
-                            className={`w-full aspect-square object-cover ${customBg ? 'hidden' : 'block'}`}
-                         />
-                         
-                         {/* Hidden Custom Media Elements */}
-                         {customBg?.type === 'image' && (
-                             <img 
-                                id="custom-bg-img"
-                                src={customBg.url}
-                                className="hidden"
-                                crossOrigin="anonymous"
-                                alt="custom-bg"
+                        <div className="bg-slate-900/50 px-4 py-3 border-b border-slate-700 flex justify-between items-center">
+                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Lyrics & Structure Source</h3>
+                            <button 
+                                onClick={handleApplyLyrics}
+                                disabled={!alignment}
+                                className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-2 py-1 rounded transition-colors disabled:opacity-50"
+                                title="Update lines based on this text"
+                            >
+                                Apply Structure
+                            </button>
+                        </div>
+                        <div className="p-2">
+                             <textarea 
+                                value={lyricSource}
+                                onChange={(e) => setLyricSource(e.target.value)}
+                                className="w-full h-40 bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-300 placeholder-slate-600 focus:ring-1 focus:ring-purple-500 outline-none custom-scrollbar resize-none leading-relaxed"
+                                placeholder="Paste lyrics here. Use newlines to determine how lines are grouped in the visualizer."
                              />
-                         )}
-                         <video 
-                             ref={customVideoRef}
-                             src={customBg?.type === 'video' ? customBg.url : ''}
-                             className="hidden"
-                             crossOrigin="anonymous"
-                             muted
-                             playsInline
-                             loop
-                         />
+                             <p className="text-[10px] text-slate-500 mt-2 px-1">
+                                <strong>Tip:</strong> This text determines line breaks. Aligning is fuzzy; edit text to fix grouping issues.
+                             </p>
+                        </div>
+                     </div>
 
-                         {customBg && (
-                             <div className="w-full h-48 bg-slate-900 flex flex-col items-center justify-center border-b border-slate-700 relative overflow-hidden">
-                                {customBg.type === 'video' ? (
-                                    <div className="text-center p-4">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 mx-auto mb-2 text-purple-400">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5m-3.75-13.5H9m3 0h3.75M9 18.75H5.25m8.25 0h3.75" />
-                                        </svg>
-                                        <span className="text-xs text-white block truncate max-w-[200px]">{customBg.name}</span>
-                                        <span className="text-[10px] text-slate-500 uppercase">Video Background</span>
-                                    </div>
-                                ) : (
-                                    <img src={customBg.url} className="w-full h-full object-cover opacity-80" alt="preview" />
-                                )}
-                                <button 
-                                    onClick={() => setCustomBg(null)}
-                                    className="absolute top-2 right-2 bg-red-600/80 hover:bg-red-600 text-white p-1 rounded-full shadow-lg"
-                                    title="Remove Custom Background"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                                        <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                                    </svg>
-                                </button>
-                             </div>
-                         )}
+                     {/* Visual Settings Card */}
+                     <div className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 shadow-lg p-4 space-y-4">
+                         {/* Cover Art */}
+                         <div className="relative group rounded-lg overflow-hidden border border-slate-700/50">
+                             <img 
+                                id="source-img"
+                                src={imgSrc} 
+                                alt="Cover" 
+                                crossOrigin="anonymous" // CRITICAL FOR CANVAS EXPORT
+                                onError={handleImageError}
+                                className={`w-full h-32 object-cover ${customBg ? 'opacity-50' : 'opacity-100'}`}
+                             />
+                             {customBg && (
+                                 <div className="absolute inset-0 flex items-center justify-center">
+                                      {customBg.type === 'video' ? (
+                                         <div className="bg-black/70 p-2 rounded-full">
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-white">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5m-3.75-13.5H9m3 0h3.75M9 18.75H5.25m8.25 0h3.75" />
+                                            </svg>
+                                         </div>
+                                      ) : (
+                                          <img src={customBg.url} className="w-full h-full object-cover" alt="custom" />
+                                      )}
+                                      <button 
+                                        onClick={() => setCustomBg(null)}
+                                        className="absolute top-1 right-1 bg-red-600 text-white p-1 rounded-full shadow-lg hover:bg-red-500"
+                                        title="Remove Custom BG"
+                                      >
+                                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
+                                            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                                          </svg>
+                                      </button>
+                                 </div>
+                             )}
+                             
+                             {/* Hidden Custom Media Elements */}
+                             {customBg?.type === 'image' && (
+                                 <img 
+                                    id="custom-bg-img"
+                                    src={customBg.url}
+                                    className="hidden"
+                                    crossOrigin="anonymous"
+                                    alt="custom-bg"
+                                 />
+                             )}
+                             <video 
+                                 ref={customVideoRef}
+                                 src={customBg?.type === 'video' ? customBg.url : ''}
+                                 className="hidden"
+                                 crossOrigin="anonymous"
+                                 muted
+                                 playsInline
+                                 loop
+                             />
+                         </div>
 
-                         <div className="p-4 space-y-4">
-                             <div>
-                                <h3 className="font-bold text-white text-lg truncate">{clipData.title}</h3>
-                                <p className="text-xs text-slate-400 font-mono mb-4">{clipData.id}</p>
-                             </div>
-
-                             {/* Visualizer Settings */}
-                             <div className="space-y-3 bg-slate-900/50 p-3 rounded-lg border border-slate-700/50">
-                                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Visual Settings</h4>
-                                 
+                         {/* Settings */}
+                         <div className="space-y-3">
                                  {/* Aspect Ratio Selector */}
                                  <div>
                                      <label className="text-xs text-slate-500 block mb-1">Aspect Ratio</label>
                                      <select 
                                         value={aspectRatio}
                                         onChange={(e) => setAspectRatio(e.target.value as keyof typeof ASPECT_RATIOS)}
-                                        className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-xs text-white focus:ring-1 focus:ring-purple-500"
+                                        className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs text-white focus:ring-1 focus:ring-purple-500"
                                      >
                                          {Object.entries(ASPECT_RATIOS).map(([key, val]) => (
                                              <option key={key} value={key}>{val.label} ({val.width}x{val.height})</option>
@@ -1018,7 +1067,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                  {/* File Upload */}
                                  <div>
                                      <label className="text-xs text-slate-500 block mb-1">Custom Background</label>
-                                     <label className="flex items-center justify-center w-full px-2 py-2 border border-dashed border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition-colors group">
+                                     <label className="flex items-center justify-center w-full px-2 py-2 border border-dashed border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition-colors group bg-slate-900/50">
                                          <input 
                                             type="file" 
                                             accept="image/png, image/jpeg, image/webp, video/mp4, video/webm" 
@@ -1033,10 +1082,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                          </div>
                                      </label>
                                  </div>
-                             </div>
-                             
-                             <div className="flex flex-col gap-2">
-                                <div className="flex items-center gap-2">
+                         </div>
+                     </div>
+                     
+                     {/* AI Controls */}
+                     <div className="bg-slate-800 rounded-xl p-4 border border-slate-700">
+                            <div className="flex flex-col gap-2">
+                                <div className="flex items-center gap-2 mb-1">
                                     <span className={`w-2 h-2 rounded-full ${alignment ? 'bg-green-500' : 'bg-red-500'}`}></span>
                                     <span className="text-xs text-slate-300">
                                         {alignment ? `${alignment.length} words synced` : 'No alignment data found'}
@@ -1047,7 +1099,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                      <button 
                                         onClick={handleSmartGroup}
                                         disabled={isGrouping || isRendering}
-                                        className="mt-2 w-full py-2 bg-slate-700 hover:bg-purple-600 text-white text-xs font-bold rounded transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                                        className="w-full py-2 bg-slate-700 hover:bg-purple-600 text-white text-xs font-bold rounded transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                                      >
                                          {isGrouping ? (
                                              <svg className="animate-spin h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -1056,18 +1108,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                              </svg>
                                          ) : (
                                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-                                                <path d="M4 21v-7" />
-                                                <path d="M4 10V3" />
-                                                <path d="M12 21v-9" />
-                                                <path d="M12 8V3" />
-                                                <path d="M20 21v-5" />
-                                                <path d="M20 12V3" />
-                                                <path d="M1 14h6" />
-                                                <path d="M9 8h6" />
-                                                <path d="M17 16h6" />
+                                                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                                                <path d="M3 3v5h5" />
+                                                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                                                <path d="M16 16h5v5" />
                                             </svg>
                                          )}
-                                         Smart Group Lines (AI)
+                                         Refine Lines with AI
                                      </button>
                                 )}
                              </div>
@@ -1077,12 +1124,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                      Attempts to fetch alignment happen automatically. If red, ensure you are logged in and this is your song.
                                  </p>
                              )}
-                         </div>
                      </div>
 
                      {/* Audio Player (Hidden visually but used for logic) */}
-                     <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                         <p className="text-xs font-bold text-slate-500 uppercase mb-2">Preview Audio</p>
+                     <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 hidden">
                          <audio 
                             ref={audioRef} 
                             controls 
@@ -1132,7 +1177,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                  </div>
 
                  {/* Right: Canvas Preview */}
-                 <div className="lg:col-span-2">
+                 <div className="lg:col-span-2 space-y-4">
                      <div className="bg-black border border-slate-700 rounded-xl overflow-hidden shadow-2xl relative flex items-center justify-center bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCIgZmlsbD0iIzIyMiI+PHJlY3Qgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiB4PSIwIiB5PSIwIiBmaWxsPSIjMzMzIi8+PHJlY3Qgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiB4PSIxMCIgeT0iMTAiIGZpbGw9IiMzMzMiLz48L3N2Zz4=')]">
                          <canvas 
                             ref={canvasRef}
@@ -1156,9 +1201,47 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                              </div>
                          )}
                      </div>
-                     <div className="mt-2 flex justify-between text-xs text-slate-500 font-mono">
+                     <div className="flex justify-between items-center text-xs text-slate-500 font-mono bg-slate-900/50 p-2 rounded-lg border border-slate-800">
                          <span>{ASPECT_RATIOS[aspectRatio].label} • {ASPECT_RATIOS[aspectRatio].width}x{ASPECT_RATIOS[aspectRatio].height} • 30fps</span>
-                         <span>{isRendering ? 'RENDERING' : 'PREVIEW'}</span>
+                         <div className="flex items-center gap-4">
+                             {audioRef.current && (
+                                <span className="text-purple-400">
+                                    {Math.floor(progress / 60)}:{(Math.floor(progress) % 60).toString().padStart(2, '0')} 
+                                    / 
+                                    {Math.floor(audioRef.current.duration / 60)}:{(Math.floor(audioRef.current.duration) % 60).toString().padStart(2, '0')}
+                                </span>
+                             )}
+                             <span>{isRendering ? 'RENDERING' : 'PREVIEW'}</span>
+                         </div>
+                     </div>
+                     
+                     {/* Audio Controls for Preview */}
+                     <div className="flex gap-2">
+                        <button 
+                            onClick={() => {
+                                if(audioRef.current) {
+                                    if(audioRef.current.paused) audioRef.current.play();
+                                    else audioRef.current.pause();
+                                }
+                            }}
+                            className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl border border-slate-700 transition-colors flex items-center justify-center gap-2"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                                <path fillRule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clipRule="evenodd" />
+                            </svg>
+                            Play / Pause
+                        </button>
+                        <button 
+                            onClick={() => {
+                                if(audioRef.current) audioRef.current.currentTime = 0;
+                            }}
+                            className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 px-6 rounded-xl border border-slate-700 transition-colors"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                                <path d="M3 3v5h5" />
+                            </svg>
+                        </button>
                      </div>
                  </div>
              </div>
