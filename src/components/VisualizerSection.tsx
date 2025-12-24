@@ -80,42 +80,46 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   };
 
   /**
-   * Simple heuristic to group words into lines based on clean text lyrics.
+   * Robust grouping based on timing gaps and character count.
+   * This ensures the visualizer paces with the audio gaps, rather than getting desynced by text mismatch.
    */
-  const simpleLineGroup = (textLyrics: string, aligned: AlignedWord[]): AlignedWord[][] => {
-      if (!textLyrics || !aligned || aligned.length === 0) return [];
-      
-      const cleanText = stripMetaTags(textLyrics);
-      const textLines = cleanText.split('\n');
-      
+  const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
       const cleanAligned = aligned.filter(w => !isMetaWord(w.word));
-      
+      if (cleanAligned.length === 0) return [];
+
       const groups: AlignedWord[][] = [];
-      let wordIdx = 0;
-
-      for (const line of textLines) {
-          const wordsInLine = line.split(/\s+/).filter(w => /[a-zA-Z0-9\u00C0-\u00FF]/.test(w)).length;
-          
-          if (wordsInLine === 0) continue;
-
-          const matchedWords: AlignedWord[] = [];
-          
-          for (let i = 0; i < wordsInLine; i++) {
-              if (wordIdx >= cleanAligned.length) break;
-              matchedWords.push(cleanAligned[wordIdx]);
-              wordIdx++;
-          }
-          if (matchedWords.length > 0) groups.push(matchedWords);
-      }
+      let currentLine: AlignedWord[] = [];
       
-      if (wordIdx < cleanAligned.length) {
-          const remainder = cleanAligned.slice(wordIdx);
-          const chunkSize = 6;
-          for (let i = 0; i < remainder.length; i += chunkSize) {
-              groups.push(remainder.slice(i, i + chunkSize));
-          }
-      }
+      const GAP_THRESHOLD = 0.65; // Seconds of silence to trigger new line
+      const MAX_CHARS = 45;       // Max characters per line before soft-wrap
 
+      cleanAligned.forEach((word, idx) => {
+          if (idx === 0) {
+              currentLine.push(word);
+              return;
+          }
+
+          const prevWord = cleanAligned[idx - 1];
+          const timeGap = word.start_s - prevWord.end_s;
+          
+          // Calculate current line length (approx)
+          const currentLen = currentLine.reduce((sum, w) => sum + w.word.length + 1, 0);
+
+          const isGapBig = timeGap > GAP_THRESHOLD;
+          const isLineLong = currentLen > MAX_CHARS;
+          // Check for punctuation at end of previous word (if present in data)
+          const endsClause = /[.,;!?]$/.test(prevWord.word);
+
+          // Force break if gap is big, OR if line is long/punctuated AND there is at least a small gap
+          if (isGapBig || ((isLineLong || endsClause) && timeGap > 0.15)) {
+              groups.push(currentLine);
+              currentLine = [word];
+          } else {
+              currentLine.push(word);
+          }
+      });
+
+      if (currentLine.length > 0) groups.push(currentLine);
       return groups;
   };
 
@@ -129,13 +133,11 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     if (fromHistory) {
         setClipData(fromHistory);
         
-        // Determine the best source of lyrics
-        const rawLyrics = fromHistory.originalData?.lyricsAlone || fromHistory.metadata?.prompt || "";
-        
         if (fromHistory.alignmentData) {
             setAlignment(fromHistory.alignmentData);
-            const simpleLines = simpleLineGroup(rawLyrics, fromHistory.alignmentData);
-            setLines(simpleLines);
+            // Use time-based grouping by default for accuracy
+            const autoLines = groupWordsByTiming(fromHistory.alignmentData);
+            setLines(autoLines);
         } else if (sunoCookie && !fromHistory.id.startsWith('draft_')) {
              setIsPreparing(true);
              getLyricAlignment(fromHistory.id, sunoCookie)
@@ -143,8 +145,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                     if(res && res.aligned_words) {
                         setAlignment(res.aligned_words);
                         onUpdateClip(fromHistory.id, { alignmentData: res.aligned_words });
-                        const simpleLines = simpleLineGroup(rawLyrics, res.aligned_words);
-                        setLines(simpleLines);
+                        const autoLines = groupWordsByTiming(res.aligned_words);
+                        setLines(autoLines);
                     }
                 })
                 .catch(err => console.error("Failed to fetch alignment for visualizer", err))
