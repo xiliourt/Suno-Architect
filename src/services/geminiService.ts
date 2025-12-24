@@ -1,11 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
+import { SUNO_SYSTEM_INSTRUCTION } from "../constants";
 import { ParsedSunoOutput } from "../types";
 
-export const generateSunoPrompt = async (
-  userInput: string, 
-  customApiKey?: string,
-  systemInstruction?: string
-): Promise<ParsedSunoOutput> => {
+export const generateSunoPrompt = async (userInput: string, customApiKey?: string): Promise<ParsedSunoOutput> => {
   const apiKey = customApiKey || process.env.API_KEY;
 
   if (!apiKey) {
@@ -14,16 +11,12 @@ export const generateSunoPrompt = async (
 
   const ai = new GoogleGenAI({ apiKey });
 
-  if (!systemInstruction) {
-      throw new Error("System Instruction is missing.");
-  }
-
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: userInput,
       config: {
-        systemInstruction: systemInstruction,
+        systemInstruction: SUNO_SYSTEM_INSTRUCTION,
         temperature: 0.8,
       },
     });
