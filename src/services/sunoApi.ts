@@ -36,6 +36,40 @@ export const getSunoCredits = async (cookie: string): Promise<number> => {
     }
 };
 
+export const getSunoFeed = async (cookie: string): Promise<any> => {
+    if (!cookie) throw new Error("No cookie provided");
+
+    // Direct Feed Endpoint
+    const FEED_ENDPOINT = "https://studio-api.prod.suno.com/api/feed/v2?page=0";
+
+    try {
+        const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+        };
+
+        const trimmedCookie = cookie.trim();
+        if (trimmedCookie.startsWith("ey")) {
+             headers["Authorization"] = `Bearer ${trimmedCookie}`;
+        } else {
+             headers["Authorization"] = `Bearer ${trimmedCookie}`;
+        }
+
+        const response = await fetch(FEED_ENDPOINT, {
+            method: "GET",
+            headers: headers
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch feed. Status: ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error("Failed to get suno feed:", error);
+        throw error;
+    }
+};
+
 export const getLyricAlignment = async (songId: string, cookie: string): Promise<LyricAlignmentResponse> => {
     if (!cookie) throw new Error("No cookie provided");
 
