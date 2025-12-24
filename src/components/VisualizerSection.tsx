@@ -5,6 +5,27 @@ import { groupLyricsByLines } from '../services/geminiService';
 // @ts-ignore
 import { Muxer, ArrayBufferTarget } from 'webm-muxer';
 
+// Declarations for WebCodecs API
+declare class AudioEncoder {
+  constructor(init: { output: (chunk: any, meta: any) => void; error: (e: any) => void });
+  configure(config: { codec: string; numberOfChannels: number; sampleRate: number; bitrate: number }): void;
+  encode(data: AudioData): void;
+  flush(): Promise<void>;
+  close(): void;
+}
+
+declare class AudioData {
+  constructor(init: {
+    format: string;
+    sampleRate: number;
+    numberOfFrames: number;
+    numberOfChannels: number;
+    timestamp: number;
+    data: Float32Array;
+  });
+  close(): void;
+}
+
 interface VisualizerSectionProps {
   history: SunoClip[];
   sunoCookie?: string;
