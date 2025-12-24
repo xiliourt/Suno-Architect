@@ -48,6 +48,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   // Visual Settings
   const [aspectRatio, setAspectRatio] = useState<keyof typeof ASPECT_RATIOS>("16:9");
   const [customBg, setCustomBg] = useState<{ url: string, type: 'image' | 'video', name: string } | null>(null);
+  const [imgSrc, setImgSrc] = useState<string>('');
 
   // Data State
   const [clipData, setClipData] = useState<SunoClip | null>(null);
@@ -132,6 +133,26 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
       if (currentLine.length > 0) groups.push(currentLine);
       return groups;
+  };
+
+  // Handle Image Source Logic (Cache busting for CORS)
+  useEffect(() => {
+    if (!clipData) return;
+
+    // Prefer large image, then standard, then constructed
+    let url = clipData.imageLargeUrl || clipData.imageUrl || `https://cdn2.suno.ai/image_large_${clipData.id}.jpeg`;
+    
+    // Add cache buster if it's a Suno URL to prevent CORS errors from cached opaque responses
+    if (url.includes('suno.ai') && !url.includes('?')) {
+        url += `?t=${Date.now()}`;
+    }
+    
+    setImgSrc(url);
+  }, [clipData]);
+
+  const handleImageError = () => {
+      // Fallback placeholder
+      setImgSrc('https://placehold.co/1080x1080/1e293b/475569?text=No+Cover');
   };
 
   // Load Clip Data when ID changes
@@ -753,9 +774,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                      <div className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 shadow-lg">
                          <img 
                             id="source-img"
-                            src={clipData.imageUrl} 
+                            src={imgSrc} 
                             alt="Cover" 
                             crossOrigin="anonymous" // CRITICAL FOR CANVAS EXPORT
+                            onError={handleImageError}
                             className={`w-full aspect-square object-cover ${customBg ? 'hidden' : 'block'}`}
                          />
                          
