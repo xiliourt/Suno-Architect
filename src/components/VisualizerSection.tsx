@@ -388,60 +388,75 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
              const displayWords = line.filter(w => !isMetaWord(w.word));
              if (displayWords.length === 0) return;
 
-             const centerY = (height / 2) + offsetY;
-             
+             // Font Size Calculation
              let fontSize = 48 * scale;
              // Adjust font size for vertical video
              if (aspectRatio === "9:16") fontSize = 36 * scale; 
 
              ctx.font = `bold ${fontSize}px Inter, sans-serif`;
-             
-             let totalWidth = 0;
-             const measurements = displayWords.map(w => {
-                 const m = ctx.measureText(w.word + " ");
-                 totalWidth += m.width;
-                 return m.width;
+             const lineHeight = fontSize * 1.3;
+             const maxW = width * 0.85; // Allow text to take up 85% of screen width
+
+             // Measure words
+             const wordsWithWidths = displayWords.map(w => ({
+                 ...w,
+                 width: ctx.measureText(w.word + " ").width
+             }));
+
+             // Word Wrapping Logic
+             const rows: { words: typeof wordsWithWidths, width: number }[] = [];
+             let currentRow: typeof wordsWithWidths = [];
+             let currentWidth = 0;
+
+             wordsWithWidths.forEach(w => {
+                 if (currentWidth + w.width > maxW && currentRow.length > 0) {
+                     rows.push({ words: currentRow, width: currentWidth });
+                     currentRow = [w];
+                     currentWidth = w.width;
+                 } else {
+                     currentRow.push(w);
+                     currentWidth += w.width;
+                 }
              });
-             
-             const maxW = width * 0.9;
-             if (totalWidth > maxW) {
-                 const ratio = maxW / totalWidth;
-                 fontSize *= ratio;
-                 ctx.font = `bold ${fontSize}px Inter, sans-serif`;
-                 totalWidth = 0;
-                 measurements.forEach((_, i) => {
-                     const m = ctx.measureText(displayWords[i].word + " ");
-                     measurements[i] = m.width;
-                     totalWidth += m.width;
-                 });
+             if (currentRow.length > 0) {
+                 rows.push({ words: currentRow, width: currentWidth });
              }
              
-             let currentX = (width - totalWidth) / 2;
+             // Calculate Vertical Centering for the Text Block
+             // ctx.textBaseline is 'middle' (set in parent scope)
+             const blockCenterY = (height / 2) + offsetY;
+             // Start Y for the first row to ensure the whole block is centered
+             const startY = blockCenterY - ((rows.length - 1) * lineHeight) / 2;
 
-             displayWords.forEach((w, i) => {
-                 const isWordActive = time >= w.start_s && time <= w.end_s;
-                 const isWordPast = time > w.end_s;
-                 
-                 if (lineIdx === activeLineIdx) {
-                    if (isWordActive) {
-                        ctx.fillStyle = '#e879f9'; 
-                        ctx.shadowColor = '#d946ef'; 
-                        ctx.shadowBlur = 25;
-                    } else if (isWordPast) {
-                        ctx.fillStyle = '#f1f5f9'; 
-                        ctx.shadowBlur = 0;
-                    } else {
-                        ctx.fillStyle = 'rgba(255,255,255,0.3)'; 
-                        ctx.shadowBlur = 0;
-                    }
-                 } else {
-                     ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-                     ctx.shadowBlur = 0;
-                 }
-                 
-                 ctx.textAlign = 'left';
-                 ctx.fillText(w.word, currentX, centerY);
-                 currentX += measurements[i];
+             rows.forEach((row, rowIdx) => {
+                 const rowY = startY + (rowIdx * lineHeight);
+                 let currentX = (width - row.width) / 2;
+
+                 row.words.forEach(w => {
+                     const isWordActive = time >= w.start_s && time <= w.end_s;
+                     const isWordPast = time > w.end_s;
+                     
+                     if (lineIdx === activeLineIdx) {
+                        if (isWordActive) {
+                            ctx.fillStyle = '#e879f9'; 
+                            ctx.shadowColor = '#d946ef'; 
+                            ctx.shadowBlur = 25;
+                        } else if (isWordPast) {
+                            ctx.fillStyle = '#f1f5f9'; 
+                            ctx.shadowBlur = 0;
+                        } else {
+                            ctx.fillStyle = 'rgba(255,255,255,0.3)'; 
+                            ctx.shadowBlur = 0;
+                        }
+                     } else {
+                         ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+                         ctx.shadowBlur = 0;
+                     }
+                     
+                     ctx.textAlign = 'left';
+                     ctx.fillText(w.word, currentX, rowY);
+                     currentX += w.width;
+                 });
              });
              ctx.shadowBlur = 0;
           };
