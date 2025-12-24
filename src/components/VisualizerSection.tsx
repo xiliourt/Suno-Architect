@@ -31,6 +31,7 @@ interface VisualizerSectionProps {
   sunoCookie?: string;
   onUpdateClip: (id: string, updates: Partial<SunoClip>) => void;
   apiKey?: string;
+  geminiModel?: string; // Add this prop
 }
 
 const ASPECT_RATIOS = {
@@ -40,7 +41,7 @@ const ASPECT_RATIOS = {
   "4:3": { width: 1024, height: 768, label: "Classic (4:3)" }
 };
 
-const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCookie, onUpdateClip, apiKey }) => {
+const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCookie, onUpdateClip, apiKey, geminiModel }) => {
   // Selection State
   const [selectedClipId, setSelectedClipId] = useState<string>('');
   const [manualId, setManualId] = useState('');
@@ -188,7 +189,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     } else {
         setClipData({
             id: selectedClipId,
-            title: 'Suno Track',
+            title: '', // Removed default 'Suno Track' branding
             created_at: new Date().toISOString(),
             model_name: 'Unknown',
             imageUrl: `https://cdn2.suno.ai/image_large_${selectedClipId}.jpeg`,
@@ -244,7 +245,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       setIsGrouping(true);
       try {
           const cleanAligned = alignment.filter(w => !isMetaWord(w.word));
-          const grouped = await groupLyricsByLines(cleanLyrics, cleanAligned, apiKey);
+          // Pass the geminiModel prop to the service
+          const grouped = await groupLyricsByLines(cleanLyrics, cleanAligned, apiKey, geminiModel);
           if (grouped && grouped.length > 0) {
               setLines(grouped);
           } else {
@@ -475,7 +477,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       ctx.fillStyle = '#ffffff';
       
       const titleY = aspectRatio === "9:16" ? 120 : 60;
-      ctx.fillText(clipData?.title || "Unknown Track", width / 2, titleY);
+      if (clipData?.title) {
+          ctx.fillText(clipData.title, width / 2, titleY);
+      }
 
       if (clipData && audioRef.current && audioRef.current.duration) {
           const pct = time / audioRef.current.duration;
@@ -542,7 +546,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         const { width: targetWidth, height: targetHeight } = ASPECT_RATIOS[aspectRatio];
 
         // 3. Setup Muxer with FileSystem Strategy if available
-        const filename = `${clipData.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${aspectRatio.replace(':','-')}.webm`;
+        const filename = `${(clipData.title || 'video').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${aspectRatio.replace(':','-')}.webm`;
         let muxerTarget: any;
 
         // Try direct disk streaming if browser supports it
