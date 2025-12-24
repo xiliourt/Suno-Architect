@@ -8,6 +8,8 @@ interface HeaderProps {
   sunoCredits: number | null;
   sunoModel?: string;
   onModelChange?: (model: string) => void;
+  geminiModel: string;
+  onGeminiModelChange: (model: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
@@ -16,7 +18,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSunoSettings,
   sunoCredits,
   sunoModel,
-  onModelChange
+  onModelChange,
+  geminiModel,
+  onGeminiModelChange
 }) => {
   const [hasKey, setHasKey] = useState(false);
   const [isAiStudio, setIsAiStudio] = useState(false);
@@ -124,7 +128,7 @@ export const Header: React.FC<HeaderProps> = ({
         {showKeyInput && !isAiStudio && (
             <div className="absolute top-14 right-0 bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-2xl w-80 z-50 animate-in fade-in slide-in-from-top-2">
                 <label className="block text-xs font-semibold text-slate-400 mb-2">Enter your Gemini API Key</label>
-                <div className="flex gap-2">
+                <div className="flex gap-2 mb-4">
                     <input 
                         type="password" 
                         value={manualKey}
@@ -154,6 +158,20 @@ export const Header: React.FC<HeaderProps> = ({
                         </svg>
                     </button>
                 </div>
+                
+                {/* Gemini Model Selector */}
+                <div className="pt-3 border-t border-slate-700">
+                     <label className="block text-xs font-semibold text-slate-400 mb-2">Gemini Model</label>
+                     <select 
+                        value={geminiModel}
+                        onChange={(e) => onGeminiModelChange(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all cursor-pointer"
+                     >
+                        <option value="gemini-3-flash-preview">Gemini 3.0 Flash (Preview)</option>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                     </select>
+                </div>
+
                 <p className="text-[10px] text-slate-500 mt-3 leading-relaxed">
                     Your key is stored locally in your browser. 
                     <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-purple-400 hover:text-purple-300 hover:underline ml-1 transition-colors">
