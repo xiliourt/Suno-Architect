@@ -68,8 +68,8 @@ ${library.theory.join(", ")}
 (Standard Suno Parameters: Exclude Styles, Vocal Gender, Weirdness, Style Influence)
 **Style Influence (Token Weight):**
 * 0-30% (Loose): Suggestions only.
-* 40-60% (Balanced): Default recommendation.
-* 60-80% (Strict): Required for complex timing (e.g., "7/8 time") or sub-genres.
+* 40-65% (Balanced): Default recommendation.
+* 70-80% (Strict): Required for complex timing (e.g., "7/8 time") or sub-genres.
 
 ---
 
@@ -168,7 +168,7 @@ ${knowledgeBase}
 2. **Motion:** Use subtle verbs: *linger, drift, shift, slip, settle, press*.
 3. **Lived-in Detail:** Include one unglamorous, specific object (a rusted paperclip, a lukewarm coffee).
 4. **Meter:** Vary line lengths. Avoid symmetrical "nursery rhyme" structures.
-5. **Punctuation:** Use hyphens (-) for breaks. Never use em dashes.
+5. **Punctuation:** Use standard punctuation. Do not end lines with hyphens. Avoid em dashes.
 6. **Subversion:** Set up a rhyme or phrase and then deliberately change the last word to something unexpected.
 
 ### PART 2: NEGATIVE CONSTRAINTS (THE "VOID" LIST)
