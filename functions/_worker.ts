@@ -84,6 +84,8 @@ async function handleSunoRequest(request: Request, targetUrl: string, corsHeader
 
   // --- CAPTCHA CHECK START ---
   try {
+    // We check the captcha status first. 
+    // If 'required' is NOT false, we block the request and tell the user to re-authenticate.
     const checkResponse = await fetch("https://studio-api.prod.suno.com/api/c/check", {
         method: "POST",
         headers: headers,
@@ -92,6 +94,9 @@ async function handleSunoRequest(request: Request, targetUrl: string, corsHeader
 
     if (checkResponse.ok) {
         const checkData = await checkResponse.json() as any;
+        // If required is true (or undefined), we must stop.
+        // { "required": false } -> false !== false -> false (Proceeds)
+        // { "required": true }  -> true !== false  -> true (Blocks)
         if (checkData?.required !== false) {
              return new Response(JSON.stringify({ 
                  error: "Suno CAPTCHA verification required. Please login to Suno.com, solve the captcha, and update your token in Settings.",
@@ -106,7 +111,7 @@ async function handleSunoRequest(request: Request, targetUrl: string, corsHeader
         }
     }
   } catch (e) {
-      // Ignore check failures to avoid blocking if the check endpoint itself is down
+      // Ignore check failures to avoid blocking if the check endpoint itself is down/changed
       console.warn("Suno captcha check failed, proceeding anyway", e);
   }
   // --- CAPTCHA CHECK END ---
