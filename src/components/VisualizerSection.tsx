@@ -527,7 +527,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   };
 
   // --- DRAWING LOGIC ---
-  const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number) => {
+  const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number, overrideSmoothing?: number) => {
       // 1. Draw Background
       ctx.fillStyle = '#1e1e1e';
       ctx.fillRect(0, 0, width, height);
@@ -593,7 +593,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                   smoothLineIdxRef.current = activeLineIdx;
               } else {
                   // Apply smoothing factor
-                  smoothLineIdxRef.current += diff * smoothingFactor;
+                  // Use override if provided (for offline render consistency)
+                  const factor = overrideSmoothing ?? smoothingFactor;
+                  smoothLineIdxRef.current += diff * factor;
               }
           }
 
@@ -768,7 +770,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           // Simple smooth scroll for raw words?
           const diff = baseIndex - smoothLineIdxRef.current;
           if (Math.abs(diff) > 5) smoothLineIdxRef.current = baseIndex;
-          else smoothLineIdxRef.current += diff * smoothingFactor;
+          else {
+              const factor = overrideSmoothing ?? smoothingFactor;
+              smoothLineIdxRef.current += diff * factor;
+          }
 
           const renderIdx = smoothLineIdxRef.current;
           const startWindow = Math.floor(renderIdx) - 2;
@@ -857,6 +862,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     setIsRendering(true);
     setRenderProgress(0);
 
+    // Store previous ref to restore after render
+    const originalSmoothRef = smoothLineIdxRef.current;
+    
+    // Reset to start to prevent lag artifacts at the beginning of the video
+    smoothLineIdxRef.current = 0; 
+
+    // Calculate compensated smoothing factor for 30fps
+    // Standard preview is approx 60fps. Offline is 30fps.
+    // We want similar convergence speed per second of audio.
+    // Factor_30 = 1 - (1 - Factor_60)^2
+    const factor30 = 1 - Math.pow(1 - smoothingFactor, 2);
+
     let fileHandle: any = null;
     let writableStream: any = null;
 
@@ -894,6 +911,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             } catch (err: any) {
                 if (err.name === 'AbortError') {
                     setIsRendering(false);
+                    // Restore ref if aborted
+                    smoothLineIdxRef.current = originalSmoothRef;
                     return;
                 }
                 console.warn("File System Access failed, falling back to RAM.", err);
@@ -987,7 +1006,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 }
             }
 
-            renderFrame(ctx, targetWidth, targetHeight, t);
+            // PASS OVERRIDE SMOOTHING FACTOR
+            renderFrame(ctx, targetWidth, targetHeight, t, factor30);
             
             // @ts-ignore
             const frame = new VideoFrame(canvasRef.current, { timestamp: t * 1000000 });
@@ -1064,6 +1084,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     } finally {
         setIsRendering(false);
         setRenderProgress(0);
+        // Restore ref state so preview doesn't jump back
+        smoothLineIdxRef.current = originalSmoothRef;
         requestRef.current = requestAnimationFrame(animate);
     }
   };
