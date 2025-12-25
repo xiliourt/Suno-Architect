@@ -18,4 +18,4 @@
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/xiliourt/Suno-Architect/)
 
 ## Credits
-- [https://github.com/gcui-art/suno-api/](https://github.com/gcui-art/suno-api/) has reverse engineered most of the API already, so I didn't need to do it myself. Only took some tweaking. Also has interfaces and types to know what response to expect from the API - very helpful.
+- [https://github.com/gcui-art/suno-api/](https://github.com/gcui-art/suno-api/) has reverse engineered most of the API already, so I didn't need to do it myself. Only took some tweaking, none of the code is directly use but it sure helped speeding up understanding the API. Also has interfaces and types to know what response to expect from the API - very helpful.
