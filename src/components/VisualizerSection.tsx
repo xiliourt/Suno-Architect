@@ -67,6 +67,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const [inactiveOpacity, setInactiveOpacity] = useState(0.3);
   const [fontFamily, setFontFamily] = useState('Inter, sans-serif');
   const [smoothingFactor, setSmoothingFactor] = useState(0.1); // 0.05 (Slow) to 1.0 (Instant)
+  const [verticalOffset, setVerticalOffset] = useState(0); // -0.5 to 0.5 (Percentage of height)
 
   // Data State
   const [clipData, setClipData] = useState<SunoClip | null>(null);
@@ -600,7 +601,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           const renderCenterIdx = smoothLineIdxRef.current;
           const baseIdx = Math.floor(renderCenterIdx);
           const PADDING = aspectRatio === "9:16" ? 60 : 40;
-          const centerY = height / 2;
+          
+          // Apply Vertical Offset (0 = center, positive = down, negative = up)
+          // We default to center height / 2.
+          const centerY = (height / 2) + (height * verticalOffset);
 
           // Helper to calculate line layout (cached per frame ideally, but lightweight enough)
           const getLayout = (idx: number, scale: number) => {
@@ -774,7 +778,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           const endWindow = Math.floor(renderIdx) + 3;
           
           const lineHeight = 70;
-          const centerY = height / 2;
+          const centerY = (height / 2) + (height * verticalOffset);
           const pixelOffset = (renderIdx - Math.floor(renderIdx)) * lineHeight;
 
           for (let i = startWindow; i <= endWindow; i++) {
@@ -843,7 +847,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       return () => {
           if (requestRef.current) cancelAnimationFrame(requestRef.current);
       };
-  }, [selectedClipId, alignment, lines, isRendering, aspectRatio, customBg, activeColor, inactiveColor, fontFamily, smoothingFactor, inactiveOpacity]);
+  }, [selectedClipId, alignment, lines, isRendering, aspectRatio, customBg, activeColor, inactiveColor, fontFamily, smoothingFactor, inactiveOpacity, verticalOffset]);
 
   // --- OFFLINE RENDERING LOGIC ---
   const startOfflineRender = async () => {
@@ -1370,6 +1374,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                  setInactiveOpacity(0.3);
                                  setFontFamily('Inter, sans-serif');
                                  setSmoothingFactor(0.1);
+                                 setVerticalOffset(0);
                              }} className="text-xs text-purple-400 hover:text-purple-300">Reset to Default</button>
                          </div>
                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1428,6 +1433,24 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                  <div className="flex justify-between text-[10px] text-slate-500 mt-1">
                                      <span>Smooth</span>
                                      <span>Instant</span>
+                                 </div>
+                             </div>
+
+                             {/* Vertical Offset */}
+                             <div className="col-span-2 md:col-span-1">
+                                 <label className="text-[10px] text-slate-500 block mb-1">Vertical Position</label>
+                                 <input 
+                                    type="range" 
+                                    min="-0.4" 
+                                    max="0.4" 
+                                    step="0.01" 
+                                    value={verticalOffset} 
+                                    onChange={(e) => setVerticalOffset(parseFloat(e.target.value))}
+                                    className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                 />
+                                 <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+                                     <span>Top</span>
+                                     <span>Bottom</span>
                                  </div>
                              </div>
                          </div>
