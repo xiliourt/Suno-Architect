@@ -82,6 +82,35 @@ async function handleSunoRequest(request: Request, targetUrl: string, corsHeader
   if (authHeader) headers["Authorization"] = authHeader;
   if (customCookieHeader) headers["Cookie"] = customCookieHeader;
 
+  // --- CAPTCHA CHECK START ---
+  try {
+    const checkResponse = await fetch("https://studio-api.prod.suno.com/api/c/check", {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify({ "ctype": "generation" })
+    });
+
+    if (checkResponse.ok) {
+        const checkData = await checkResponse.json() as any;
+        if (checkData?.required !== false) {
+             return new Response(JSON.stringify({ 
+                 error: "Suno CAPTCHA verification required. Please login to Suno.com, solve the captcha, and update your token in Settings.",
+                 detail: "Verification Required"
+             }), {
+                 status: 403,
+                 headers: {
+                     "Content-Type": "application/json",
+                     ...corsHeaders
+                 }
+             });
+        }
+    }
+  } catch (e) {
+      // Ignore check failures to avoid blocking if the check endpoint itself is down
+      console.warn("Suno captcha check failed, proceeding anyway", e);
+  }
+  // --- CAPTCHA CHECK END ---
+
   try {
     const sunoResponse = await fetch(targetUrl, {
       method: "POST",
