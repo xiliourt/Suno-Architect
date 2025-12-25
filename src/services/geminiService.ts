@@ -1,42 +1,36 @@
-import { GoogleGenAI } from "@google/genai";
-import { ParsedSunoOutput, AlignedWord } from "../types";
+import { ParsedSunoOutput, AlignedWord, AIProviderConfig } from "../types";
 import { STRICT_OUTPUT_SUFFIX } from "../constants";
+import { createProvider } from "./providers/providerFactory";
 
 export const generateSunoPrompt = async (
-  userInput: string, 
-  customApiKey?: string,
-  systemInstruction?: string,
-  geminiModel: string = "gemini-3-flash-preview"
+  userInput: string,
+  providerConfig: AIProviderConfig,
+  systemInstruction?: string
 ): Promise<ParsedSunoOutput> => {
-  const apiKey = customApiKey || process.env.API_KEY;
-
-  if (!apiKey) {
-    throw new Error("API Key is missing. Please set your Gemini API Key.");
+  if (!systemInstruction) {
+    throw new Error("System Instruction is missing.");
   }
 
-  const ai = new GoogleGenAI({ apiKey });
-
-  if (!systemInstruction) {
-      throw new Error("System Instruction is missing.");
+  const provider = createProvider(providerConfig);
+  
+  if (!provider.validateConfig()) {
+    throw new Error("Provider configuration is invalid.");
   }
 
   // Enforce strict output format by appending the constant rule set
   const finalSystemInstruction = `${systemInstruction}\n\n${STRICT_OUTPUT_SUFFIX}`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: geminiModel,
+    const response = await provider.generateContent({
+      model: providerConfig.model || "gemini-3-flash-preview",
       contents: userInput,
-      config: {
-        systemInstruction: finalSystemInstruction,
-        temperature: 0.8,
-      },
+      systemInstruction: finalSystemInstruction,
+      temperature: 0.8,
     });
 
-    const text = response.text || "";
-    return parseResponse(text);
+    return parseResponse(response.text);
   } catch (error: any) {
-    console.error("Gemini API Error:", error);
+    console.error("AI Provider Error:", error);
     const msg = error.message || "Failed to generate prompt.";
     throw new Error(msg);
   }
@@ -50,12 +44,12 @@ export const generateSunoPrompt = async (
 export const groupLyricsByLines = async (
   lyrics: string,
   alignedWords: AlignedWord[],
-  customApiKey?: string,
-  modelName: string = "gemini-3-flash-preview",
+  providerConfig: AIProviderConfig,
   pseudoLines?: AlignedWord[][]
 ): Promise<AlignedWord[][]> => {
-  const apiKey = customApiKey || process.env.API_KEY;
-  if (!apiKey) throw new Error("API Key required for smart grouping.");
+  if (!providerConfig.apiKey && !providerConfig.baseUrl) {
+    throw new Error("Provider configuration required for smart grouping.");
+  }
 
   // 1. Prepare Data
   // Round timestamps to 2 decimal places to significantly reduce token count.
@@ -105,7 +99,7 @@ export const groupLyricsByLines = async (
       const batchDraft = batches[i]; // Array of arrays (lines)
       
       try {
-          const batchResult = await processBatchWithGemini(batchDraft, lyrics, apiKey, modelName, i, batches.length);
+          const batchResult = await processBatchWithProvider(batchDraft, lyrics, providerConfig, i, batches.length);
           finalLines.push(...batchResult);
       } catch (err) {
           console.error(`Batch ${i+1} failed, falling back to original draft for this section.`, err);
@@ -129,15 +123,14 @@ export const groupLyricsByLines = async (
 /**
  * Helper to process a single batch of words.
  */
-const processBatchWithGemini = async (
+const processBatchWithProvider = async (
     batchDraft: any[][], // Array of lines, where each line is array of {w,s,e}
     fullLyrics: string,
-    apiKey: string,
-    modelName: string,
+    providerConfig: AIProviderConfig,
     batchIndex: number,
     totalBatches: number
 ): Promise<AlignedWord[][]> => {
-    const ai = new GoogleGenAI({ apiKey });
+    const provider = createProvider(providerConfig);
 
     // Pre-process full lyrics into lines to help Gemini match structure instantly
     // This JSON structure is easier for LLM to map against than raw text block
@@ -171,13 +164,11 @@ const processBatchWithGemini = async (
   { "lines": [[{"w": "word", "s": 1.2, "e": 1.5}, ...], ...] }
   `;
 
-    const response = await ai.models.generateContent({
-        model: modelName, 
+    const response = await provider.generateContent({
+        model: providerConfig.model || "gemini-3-flash-preview",
         contents: prompt,
-        config: { 
-            responseMimeType: "application/json",
-            temperature: 0.1 
-        }
+        responseMimeType: "application/json",
+        temperature: 0.1
     });
 
     const text = response.text || "{}";

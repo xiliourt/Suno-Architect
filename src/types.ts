@@ -68,3 +68,35 @@ export interface PromptSettings {
   library: SunoLibrary;
   constraints: LyricalConstraints;
 }
+
+export type ViewMode = 'generator' | 'history' | 'visualizer';
+
+export type ProviderType = 'gemini' | 'openrouter' | 'openapi';
+
+export interface AIProviderConfig {
+  type: ProviderType;
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  headers?: Record<string, string>;
+  authHeader?: string; // e.g., "Authorization", "X-API-Key", "x-litellm-api-key"
+  authPrefix?: string; // e.g., "Bearer ", "ApiKey "
+}
+
+export interface GenerateContentRequest {
+  model: string;
+  contents: string;
+  systemInstruction?: string;
+  temperature?: number;
+  responseMimeType?: string;
+}
+
+export interface GenerateContentResponse {
+  text: string;
+}
+
+export interface AIProvider {
+  generateContent(request: GenerateContentRequest): Promise<GenerateContentResponse>;
+  validateConfig(): boolean;
+  getAvailableModels(): Promise<string[]>;
+}

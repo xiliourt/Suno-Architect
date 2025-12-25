@@ -1,26 +1,32 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { SUNO_MODEL_MAPPINGS } from '../constants';
+import { AIProviderConfig } from '../types';
+import { validateProviderConfig } from '../services/providers/providerFactory';
 
 interface HeaderProps {
   onKeyUpdate: (key: string) => void;
   onValidationChange: (isValid: boolean) => void;
   onOpenSunoSettings: () => void;
+  onOpenProviderSettings?: () => void;
   sunoCredits: number | null;
   sunoModel?: string;
   onModelChange?: (model: string) => void;
   geminiModel: string;
   onGeminiModelChange: (model: string) => void;
+  providerConfig?: AIProviderConfig;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
   onKeyUpdate, 
   onValidationChange, 
   onOpenSunoSettings,
+  onOpenProviderSettings,
   sunoCredits,
   sunoModel,
   onModelChange,
   geminiModel,
-  onGeminiModelChange
+  onGeminiModelChange,
+  providerConfig
 }) => {
   const [hasKey, setHasKey] = useState(false);
   const [isAiStudio, setIsAiStudio] = useState(false);
@@ -55,6 +61,39 @@ export const Header: React.FC<HeaderProps> = ({
 
   useEffect(() => {
     const checkEnv = async () => {
+      // Validate based on provider config if available
+      if (providerConfig) {
+        const isValid = validateProviderConfig(providerConfig);
+        setHasKey(isValid);
+        onValidationChange(isValid);
+        
+        // For backward compatibility, also check AI Studio for Gemini
+        if (providerConfig.type === 'gemini') {
+          const aistudio = (window as any).aistudio;
+          if (aistudio && typeof aistudio.hasSelectedApiKey === 'function') {
+            try {
+              const has = await aistudio.hasSelectedApiKey();
+              if (has) {
+                setIsAiStudio(true);
+                setHasKey(true);
+                onValidationChange(true);
+              } else {
+                setIsAiStudio(false);
+              }
+            } catch (e) {
+              console.warn("AI Studio key check failed", e);
+              setIsAiStudio(false);
+            }
+          } else {
+            setIsAiStudio(false);
+          }
+        } else {
+          setIsAiStudio(false);
+        }
+        return;
+      }
+
+      // Fallback: Legacy Gemini API key check for backward compatibility
       const aistudio = (window as any).aistudio;
       let isValid = false;
       let keyToSet = '';
@@ -92,7 +131,7 @@ export const Header: React.FC<HeaderProps> = ({
     };
     
     checkEnv();
-  }, [onKeyUpdate, onValidationChange]);
+  }, [onKeyUpdate, onValidationChange, providerConfig]);
 
   const handleAction = async () => {
     if (isAiStudio) {
@@ -146,7 +185,13 @@ export const Header: React.FC<HeaderProps> = ({
           <h1 className="text-xl font-bold tracking-tight text-white">
             Suno <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">Architect</span>
           </h1>
-          <p className="text-xs text-slate-400 font-medium">Powered by Gemini 2.5 Flash</p>
+          <p className="text-xs text-slate-400 font-medium">
+            {providerConfig?.type === 'gemini' ? 'Powered by Gemini' :
+             providerConfig?.type === 'openrouter' ? 'Powered by OpenRouter' :
+             providerConfig?.type === 'openapi' ? 'Powered by Custom API' :
+             'Powered by Gemini 2.5 Flash'}
+            {providerConfig?.model && ` • ${providerConfig.model}`}
+          </p>
         </div>
       </div>
       
@@ -334,31 +379,46 @@ export const Header: React.FC<HeaderProps> = ({
             <span>Suno API</span>
         </button>
 
-        <button 
-            onClick={handleAction}
-            className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-lg transition-all shadow-lg 
-            ${!hasKey 
-                ? 'bg-slate-100 text-slate-900 hover:bg-white shadow-purple-500/10' 
-                : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'}`}
-        >
-            {!hasKey ? (
-                <>
-                    {/* Zap Icon */}
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-purple-600">
-                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                    </svg>
-                    <span>{isAiStudio ? 'Login with Google' : 'Set API Key'}</span>
-                </>
-            ) : (
-                <>
-                    {/* Key Icon */}
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                        <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
-                    </svg>
-                    <span>{isAiStudio ? 'API Key' : 'Gemini Key'}</span>
-                </>
-            )}
-        </button>
+        {onOpenProviderSettings ? (
+          <button 
+              onClick={onOpenProviderSettings}
+              className="flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-lg transition-all shadow-lg bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700"
+              title="Configure AI Provider"
+          >
+              {/* Settings Icon */}
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                  <circle cx="12" cy="12" r="3" />
+              </svg>
+              <span>AI Provider</span>
+          </button>
+        ) : (
+          <button 
+              onClick={handleAction}
+              className={`flex items-center gap-2 text-xs font-bold px-4 py-2 rounded-lg transition-all shadow-lg 
+              ${!hasKey 
+                  ? 'bg-slate-100 text-slate-900 hover:bg-white shadow-purple-500/10' 
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'}`}
+          >
+              {!hasKey ? (
+                  <>
+                      {/* Zap Icon */}
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-purple-600">
+                          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                      </svg>
+                      <span>{isAiStudio ? 'Login with Google' : 'Set API Key'}</span>
+                  </>
+              ) : (
+                  <>
+                      {/* Key Icon */}
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                          <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
+                      </svg>
+                      <span>{isAiStudio ? 'API Key' : 'Gemini Key'}</span>
+                  </>
+              )}
+          </button>
+        )}
       </div>
     </header>
   );

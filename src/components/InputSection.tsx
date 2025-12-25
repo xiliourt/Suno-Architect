@@ -1,12 +1,24 @@
 import React, { useState } from 'react';
+import { ProviderSwitcher } from './ProviderSwitcher';
+import { AIProviderConfig } from '../types';
 
 interface InputSectionProps {
   onGenerate: (prompt: string) => void;
   isLoading: boolean;
   apiKeyValid: boolean;
+  providerConfig?: AIProviderConfig;
+  onProviderConfigChange?: (config: AIProviderConfig) => void;
+  onOpenProviderSettings?: () => void;
 }
 
-const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiKeyValid }) => {
+const InputSection: React.FC<InputSectionProps> = ({ 
+  onGenerate, 
+  isLoading, 
+  apiKeyValid,
+  providerConfig,
+  onProviderConfigChange,
+  onOpenProviderSettings
+}) => {
   const [prompt, setPrompt] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -37,6 +49,20 @@ const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiK
             className="w-full h-40 bg-slate-900 border border-slate-700 rounded-xl p-4 text-slate-200 placeholder-slate-600 focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all resize-none text-base"
           />
         </div>
+
+        {/* Provider Switcher */}
+        {providerConfig && onProviderConfigChange && onOpenProviderSettings && (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-slate-400 mb-2">
+              AI Provider
+            </label>
+            <ProviderSwitcher
+              providerConfig={providerConfig}
+              onConfigChange={onProviderConfigChange}
+              onOpenSettings={onOpenProviderSettings}
+            />
+          </div>
+        )}
 
         <div className="relative group">
             <button
