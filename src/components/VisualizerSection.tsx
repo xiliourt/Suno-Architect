@@ -67,6 +67,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const [inactiveOpacity, setInactiveOpacity] = useState(0.3);
   const [fontFamily, setFontFamily] = useState('Inter, sans-serif');
   const [smoothingFactor, setSmoothingFactor] = useState(0.1); // 0.05 (Slow) to 1.0 (Instant)
+  const [verticalOffset, setVerticalOffset] = useState(0); // -0.5 to 0.5 (Percentage of height)
 
   // Data State
   const [clipData, setClipData] = useState<SunoClip | null>(null);
@@ -526,7 +527,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   };
 
   // --- DRAWING LOGIC ---
-  const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number) => {
+  const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number, overrideSmoothing?: number) => {
       // 1. Draw Background
       ctx.fillStyle = '#1e1e1e';
       ctx.fillRect(0, 0, width, height);
@@ -592,7 +593,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                   smoothLineIdxRef.current = activeLineIdx;
               } else {
                   // Apply smoothing factor
-                  smoothLineIdxRef.current += diff * smoothingFactor;
+                  // Use override if provided (for offline render consistency)
+                  const factor = overrideSmoothing ?? smoothingFactor;
+                  smoothLineIdxRef.current += diff * factor;
               }
           }
 
@@ -600,7 +603,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           const renderCenterIdx = smoothLineIdxRef.current;
           const baseIdx = Math.floor(renderCenterIdx);
           const PADDING = aspectRatio === "9:16" ? 60 : 40;
-          const centerY = height / 2;
+          
+          // Apply Vertical Offset (0 = center, positive = down, negative = up)
+          // We default to center height / 2.
+          const centerY = (height / 2) + (height * verticalOffset);
 
           // Helper to calculate line layout (cached per frame ideally, but lightweight enough)
           const getLayout = (idx: number, scale: number) => {
@@ -658,19 +664,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           }
 
           // Positioning Strategy:
-          // We want the point represented by `renderCenterIdx` to be at `centerY`.
-          // We assume "smoothLineIdx" corresponds to the CENTER of that line index.
-          // To calculate pixel offset, we sum heights relative to the center.
+          // We calculate pixel offsets using a CONSTANT REFERENCE SCALE (1.0)
+          // This ensures that as lines grow/shrink, the slot positions don't jump around.
+          // Only the text *inside* the slot grows/shrinks.
           
-          // Calculate global Y offset needed to shift the "center" line to the middle
           const fractional = renderCenterIdx - baseIdx;
           
-          // Get height of the base line and next line to determine interpolation distance
-          const baseLayout = getLayout(baseIdx, 1.2); // approx max scale for measuring spacing
-          const nextLayout = getLayout(baseIdx + 1, 1.2);
+          // Use Scale 1.0 for layout metrics to keep spacing consistent
+          const baseLayoutRef = getLayout(baseIdx, 1.0); 
+          const nextLayoutRef = getLayout(baseIdx + 1, 1.0);
           
-          const baseH = baseLayout ? baseLayout.totalHeight : 60;
-          const nextH = nextLayout ? nextLayout.totalHeight : 60;
+          const baseH = baseLayoutRef ? baseLayoutRef.totalHeight : 60;
+          const nextH = nextLayoutRef ? nextLayoutRef.totalHeight : 60;
           
           // The scroll distance for 1.0 index change is roughly (Height/2 + Padding + NextHeight/2)
           const scrollDist = (baseH / 2) + PADDING + (nextH / 2);
@@ -681,18 +686,16 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               // Calculate relative position (index delta)
               const relIndex = item.index - baseIdx; 
               
-              // We estimate Y position by summing heights. 
-              // This is an approximation for visual smoothness.
-              // For a perfect scroll, we'd sum actual heights between base and item.index.
+              // Estimate Y position by summing heights using REFERENCE SCALE (1.0)
               let yOffset = 0;
               
               if (relIndex === 0) {
                   yOffset = 0;
               } else if (relIndex > 0) {
                   // Sum heights downwards
-                  let hSum = baseH / 2 + PADDING; // Start from bottom of base
+                  let hSum = baseH / 2 + PADDING; 
                   for (let k = baseIdx + 1; k < item.index; k++) {
-                       const l = getLayout(k, 1.0); // approx
+                       const l = getLayout(k, 1.0);
                        hSum += (l ? l.totalHeight : 60) + PADDING;
                   }
                   const l = getLayout(item.index, 1.0);
@@ -700,7 +703,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                   yOffset = hSum;
               } else {
                   // Sum heights upwards
-                  let hSum = baseH / 2 + PADDING; // Start from top of base
+                  let hSum = baseH / 2 + PADDING;
                   for (let k = baseIdx - 1; k > item.index; k--) {
                       const l = getLayout(k, 1.0);
                       hSum += (l ? l.totalHeight : 60) + PADDING;
@@ -767,14 +770,17 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           // Simple smooth scroll for raw words?
           const diff = baseIndex - smoothLineIdxRef.current;
           if (Math.abs(diff) > 5) smoothLineIdxRef.current = baseIndex;
-          else smoothLineIdxRef.current += diff * smoothingFactor;
+          else {
+              const factor = overrideSmoothing ?? smoothingFactor;
+              smoothLineIdxRef.current += diff * factor;
+          }
 
           const renderIdx = smoothLineIdxRef.current;
           const startWindow = Math.floor(renderIdx) - 2;
           const endWindow = Math.floor(renderIdx) + 3;
           
           const lineHeight = 70;
-          const centerY = height / 2;
+          const centerY = (height / 2) + (height * verticalOffset);
           const pixelOffset = (renderIdx - Math.floor(renderIdx)) * lineHeight;
 
           for (let i = startWindow; i <= endWindow; i++) {
@@ -843,7 +849,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       return () => {
           if (requestRef.current) cancelAnimationFrame(requestRef.current);
       };
-  }, [selectedClipId, alignment, lines, isRendering, aspectRatio, customBg, activeColor, inactiveColor, fontFamily, smoothingFactor, inactiveOpacity]);
+  }, [selectedClipId, alignment, lines, isRendering, aspectRatio, customBg, activeColor, inactiveColor, fontFamily, smoothingFactor, inactiveOpacity, verticalOffset]);
 
   // --- OFFLINE RENDERING LOGIC ---
   const startOfflineRender = async () => {
@@ -855,6 +861,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
     setIsRendering(true);
     setRenderProgress(0);
+
+    // Store previous ref to restore after render
+    const originalSmoothRef = smoothLineIdxRef.current;
+    
+    // Reset to start to prevent lag artifacts at the beginning of the video
+    smoothLineIdxRef.current = 0; 
 
     let fileHandle: any = null;
     let writableStream: any = null;
@@ -893,6 +905,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             } catch (err: any) {
                 if (err.name === 'AbortError') {
                     setIsRendering(false);
+                    // Restore ref if aborted
+                    smoothLineIdxRef.current = originalSmoothRef;
                     return;
                 }
                 console.warn("File System Access failed, falling back to RAM.", err);
@@ -927,8 +941,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             codec: 'vp09.00.10.08',
             width: targetWidth,
             height: targetHeight,
-            bitrate: 4_000_000, // 4Mbps
-            framerate: 30
+            bitrate: 8_000_000, // Increased bitrate for 60fps
+            framerate: 60
         });
 
         // 5. Setup Audio Encoder
@@ -945,7 +959,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         });
 
         // 6. Render Video Frames with BACKPRESSURE
-        const fps = 30;
+        const fps = 60;
         const totalFrames = Math.ceil(duration * fps);
         const ctx = canvasRef.current.getContext('2d')!;
         
@@ -1063,6 +1077,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     } finally {
         setIsRendering(false);
         setRenderProgress(0);
+        // Restore ref state so preview doesn't jump back
+        smoothLineIdxRef.current = originalSmoothRef;
         requestRef.current = requestAnimationFrame(animate);
     }
   };
@@ -1175,7 +1191,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                         title="Remove Custom BG"
                                       >
                                           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
-                                            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                                            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
                                           </svg>
                                       </button>
                                  </div>
@@ -1370,6 +1386,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                  setInactiveOpacity(0.3);
                                  setFontFamily('Inter, sans-serif');
                                  setSmoothingFactor(0.1);
+                                 setVerticalOffset(0);
                              }} className="text-xs text-purple-400 hover:text-purple-300">Reset to Default</button>
                          </div>
                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1428,6 +1445,24 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                  <div className="flex justify-between text-[10px] text-slate-500 mt-1">
                                      <span>Smooth</span>
                                      <span>Instant</span>
+                                 </div>
+                             </div>
+
+                             {/* Vertical Offset */}
+                             <div className="col-span-2 md:col-span-1">
+                                 <label className="text-[10px] text-slate-500 block mb-1">Vertical Position</label>
+                                 <input 
+                                    type="range" 
+                                    min="-0.4" 
+                                    max="0.4" 
+                                    step="0.01" 
+                                    value={verticalOffset} 
+                                    onChange={(e) => setVerticalOffset(parseFloat(e.target.value))}
+                                    className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                 />
+                                 <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+                                     <span>Top</span>
+                                     <span>Bottom</span>
                                  </div>
                              </div>
                          </div>
