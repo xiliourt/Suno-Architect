@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 /* Base Styles */
 body {
@@ -32,4 +30,5 @@ textarea::-webkit-scrollbar-thumb {
 .custom-scrollbar::-webkit-scrollbar-thumb:hover,
 textarea::-webkit-scrollbar-thumb:hover {
   background: #64748b; /* Slate 500 */
+
 }
