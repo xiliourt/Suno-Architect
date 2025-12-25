@@ -326,9 +326,16 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   useEffect(() => {
     if (!clipData) return;
     let url = clipData.imageLargeUrl || clipData.imageUrl || `https://cdn2.suno.ai/image_large_${clipData.id}.jpeg`;
+    
+    // Use a Ref to ensure we only timestamp once per unique URL to prevent infinite reloads
+    // Note: We don't implement full ref caching here for simplicity, but we rely on clipData stability.
+    // If clipData is recreated repeatedly, this effect fires repeatedly.
+    // The previous bug was causing clipData to be recreated on every render loop.
+    // With loop fixed, we can safely timestamp if needed, but only if URL implies caching needs.
     if (url.includes('suno.ai') && !url.includes('?')) {
         url += `?t=${Date.now()}`;
     }
+    
     setImgSrc(url);
     if (!lyricSource) {
         // Fallback if not set by main load logic
@@ -406,11 +413,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             };
         }
         
+        // This state update is safe because the effect dependency array is now stable
         setClipData(currentClip);
 
         // --- LYRIC SOURCE LOGIC ---
-        // Prioritize metadata.prompt (Raw lyrics with tags)
-        // Fallback to lyricsAlone if prompt is empty
         let sourceText = currentClip.metadata?.prompt || "";
         if (!sourceText && currentClip.originalData?.lyricsAlone) {
             sourceText = currentClip.originalData.lyricsAlone;
@@ -425,7 +431,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                  const res = await getLyricAlignment(currentClip.id, sunoCookie);
                  if (res && res.aligned_words) {
                      align = res.aligned_words;
-                     onUpdateClip(currentClip.id, { alignmentData: align });
+                     
+                     // CRITICAL FIX: Only call update if clip exists in history
+                     // Calling update on a manual ID that isn't in history causes App state to change 
+                     // (returning new array reference) which triggers this effect again -> Infinite Loop.
+                     if (history.some(h => h.id === currentClip.id)) {
+                        onUpdateClip(currentClip.id, { alignmentData: align });
+                     }
                  }
              } catch (e) {
                  console.error("Alignment fetch failed", e);
