@@ -132,6 +132,14 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           .join('\n');
   };
 
+  const cleanStringForMatch = (s: string) => {
+      try {
+          return s.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+      } catch (e) {
+          return s.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+      }
+  };
+
   /**
    * Algorithm: Match Aligned Words to Prompt Structure.
    * This uses the "Lyric Source" textbox as the source of truth for line breaks.
@@ -142,9 +150,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       if (cleanAligned.length === 0) return [];
 
       // Step 2: Prepare Prompt Lines (Structure Source)
-      // We do NOT strictly strip meta tags here because if the user typed them in the box, 
-      // they might want them (though usually we map words). 
-      // However, we need to strip them to match the content of the audio (which doesn't speak "Verse").
       const promptLines = stripMetaTags(promptText)
           .split('\n')
           .map(l => l.trim())
@@ -157,18 +162,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       const tokens: PromptToken[] = [];
       
       promptLines.forEach((line, idx) => {
-          // Robust tokenization: split by whitespace, remove punctuation characters but preserve letters/numbers (Unicode aware)
-          const words = line.toLowerCase().split(/\s+/).map(w => {
-              // Remove common punctuation marks but keep letters and numbers
-              // Using a safe regex that covers most cases without needing ES2018 property escapes if environment is old
-              // But modern browsers support \p{L}. Fallback to basic stripping.
-              try {
-                return w.replace(/[^\p{L}\p{N}']/gu, ''); 
-              } catch (e) {
-                return w.replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
-              }
-          }).filter(w => w.length > 0);
-
+          // Robust tokenization
+          const words = line.split(/\s+/).map(cleanStringForMatch).filter(w => w.length > 0);
           words.forEach(w => tokens.push({ text: w, lineIndex: idx }));
       });
 
@@ -179,40 +174,60 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
       for (let i = 0; i < cleanAligned.length; i++) {
           const wordObj = cleanAligned[i];
-          let cleanWord = wordObj.word.toLowerCase();
-          try {
-             cleanWord = cleanWord.replace(/[^\p{L}\p{N}']/gu, '');
-          } catch(e) {
-             cleanWord = cleanWord.replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
-          }
+          const cleanWord = cleanStringForMatch(wordObj.word);
 
           if (!cleanWord) {
               currentGroup.push(wordObj);
               continue;
           }
 
-          let matchFound = false;
-          let lookahead = 0;
-          const MAX_LOOKAHEAD = 8; // Increased lookahead to handle ad-libs or missed words
+          let bestMatchOffset = -1;
+          const MAX_LOOKAHEAD = 200; // Deep search window to handle skipped sections
+          const searchLimit = Math.min(tokens.length - tokenPtr, MAX_LOOKAHEAD);
 
-          while (tokenPtr + lookahead < tokens.length && lookahead < MAX_LOOKAHEAD) {
+          for (let lookahead = 0; lookahead < searchLimit; lookahead++) {
               const target = tokens[tokenPtr + lookahead];
-              
-              // Fuzzy match: exact or contains
-              if (target.text === cleanWord || target.text.includes(cleanWord) || cleanWord.includes(target.text)) {
-                  
-                  // If we jumped to a new line index, push old group
-                  if (target.lineIndex > currentLineIndex) {
-                      if (currentGroup.length > 0) groups.push(currentGroup);
-                      currentGroup = [];
-                      currentLineIndex = target.lineIndex;
-                  }
+              const isMatch = target.text === cleanWord || target.text.includes(cleanWord) || cleanWord.includes(target.text);
 
-                  tokenPtr += lookahead + 1; // Advance token pointer past the match
-                  matchFound = true;
-                  break; 
+              if (isMatch) {
+                  // A) Trust close matches immediately
+                  if (lookahead < 5) {
+                      bestMatchOffset = lookahead;
+                      break; 
+                  }
+                  
+                  // B) For distant matches, verify context (next word) to prevent jumping to false positives
+                  if (i + 1 < cleanAligned.length && tokenPtr + lookahead + 1 < tokens.length) {
+                      const nextAudio = cleanStringForMatch(cleanAligned[i+1].word);
+                      const nextToken = tokens[tokenPtr + lookahead + 1].text;
+                      
+                      // If next word also matches, it's a strong anchor
+                      if (nextAudio && (nextToken === nextAudio || nextToken.includes(nextAudio) || nextAudio.includes(nextToken))) {
+                          bestMatchOffset = lookahead;
+                          break;
+                      }
+                  }
+                  
+                  // C) Trust long unique words
+                  if (cleanWord.length > 4) {
+                      bestMatchOffset = lookahead;
+                      break;
+                  }
               }
-              lookahead++;
+          }
+
+          if (bestMatchOffset !== -1) {
+              const target = tokens[tokenPtr + bestMatchOffset];
+              
+              // Check if we advanced to a new line
+              if (target.lineIndex > currentLineIndex) {
+                  if (currentGroup.length > 0) groups.push(currentGroup);
+                  currentGroup = [];
+                  currentLineIndex = target.lineIndex;
+              }
+
+              // Advance pointer past the match
+              tokenPtr += bestMatchOffset + 1;
           }
 
           currentGroup.push(wordObj);
