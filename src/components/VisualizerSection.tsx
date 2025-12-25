@@ -41,6 +41,8 @@ const ASPECT_RATIOS = {
   "4:3": { width: 1024, height: 768, label: "Classic (4:3)" }
 };
 
+const STOP_WORDS = new Set(['the', 'and', 'a', 'to', 'of', 'in', 'it', 'is', 'that', 'you', 'he', 'she', 'was', 'for', 'on', 'are', 'as', 'with', 'his', 'they', 'at', 'be', 'this', 'have', 'from', 'or', 'one', 'had', 'by', 'word', 'but', 'not', 'what', 'all', 'were', 'we', 'when', 'your', 'can', 'said', 'there', 'use', 'an', 'each', 'which', 'she', 'do', 'how', 'their', 'if', 'will', 'up', 'other', 'about', 'out', 'many', 'then', 'them', 'these', 'so', 'some', 'her', 'would', 'make', 'like', 'him', 'into', 'time', 'has', 'look', 'two', 'more', 'write', 'go', 'see', 'number', 'no', 'way', 'could', 'people', 'my', 'than', 'first', 'water', 'been', 'call', 'who', 'oil', 'its', 'now', 'find']);
+
 const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCookie, onUpdateClip, apiKey, geminiModel }) => {
   // Selection State
   const [selectedClipId, setSelectedClipId] = useState<string>('');
@@ -76,12 +78,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const audioContextRef = useRef<AudioContext | null>(null);
 
   /**
-   * Enhanced Helper: Filter out meta words, handling split tags across multiple tokens.
-   * Uses character-level state machine to handle cases like:
-   * 1. "[Verse 1] Feel" -> "Feel"
-   * 2. "0:22 [Intro] [" -> "0:23 Downtempo" -> "0:24 ]" (All removed)
+   * Enhanced Helper: Filter out meta words AND repair fragmented tokens.
+   * Handles:
+   * 1. "[Verse]" tags removal
+   * 2. "I" + "'" + "m" -> "I'm" merging
    */
   const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
+      // Phase 1: Strip Brackets/Tags
       const clean: AlignedWord[] = [];
       let bracketDepth = 0;
 
@@ -105,8 +108,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               }
           }
           
-          // Only keep words that have actual content after stripping tags
-          // We trim to ensure we don't keep just whitespace
           const trimmed = cleanWordBuilder.trim();
           
           if (trimmed.length > 0) {
@@ -116,7 +117,44 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               });
           }
       }
-      return clean;
+
+      // Phase 2: Repair Fragmentation (Phantom Spaces)
+      if (clean.length === 0) return [];
+
+      const fixed: AlignedWord[] = [];
+      let current = clean[0];
+
+      for (let i = 1; i < clean.length; i++) {
+           const next = clean[i];
+           const currText = current.word.trim();
+           const nextText = next.word.trim();
+           
+           // Heuristic: Merge if one side is an apostrophe or connected by one
+           // e.g. "I" + "'m" OR "I'" + "m" OR "gon" + "na" (though gonna is usually fine, ' is the main culprit)
+           const isFragment = 
+                /['’]$/.test(currText) || 
+                /^['’]/.test(nextText) ||
+                /^['’]+$/.test(currText) ||
+                /^['’]+$/.test(nextText);
+           
+           // Ensure they are close in time (gap < 0.5s) to avoid merging across actual pauses
+           const gap = next.start_s - current.end_s;
+           
+           if (isFragment && gap < 0.5) {
+               // Merge into current
+               current = {
+                   ...current,
+                   word: currText + nextText, // Concatenate
+                   end_s: next.end_s // Extend duration
+               };
+           } else {
+               fixed.push(current);
+               current = next;
+           }
+      }
+      fixed.push(current);
+      
+      return fixed;
   };
 
   /**
@@ -135,23 +173,23 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   };
 
   const cleanStringForMatch = (s: string) => {
+      if (!s) return "";
       try {
-          return s.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+          // Remove apostrophes and non-alphanumeric chars for looser matching
+          return s.toLowerCase().replace(/['’]/g, '').replace(/[^\p{L}\p{N}]/gu, '');
       } catch (e) {
-          return s.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+          return s.toLowerCase().replace(/['".,/#!$%^&*;:{}=\-_`~()]/g, "");
       }
   };
 
   /**
    * Algorithm: Match Aligned Words to Prompt Structure.
-   * This uses the "Lyric Source" textbox as the source of truth for line breaks.
+   * "Lost Mode" implemented to fallback to sync if drifting.
    */
   const matchWordsToPrompt = (aligned: AlignedWord[], promptText: string): AlignedWord[][] => {
-      // Step 1: Clean the aligned words using robust depth check
       const cleanAligned = getCleanAlignedWords(aligned);
       if (cleanAligned.length === 0) return [];
 
-      // Step 2: Prepare Prompt Lines (Structure Source)
       const promptLines = stripMetaTags(promptText)
           .split('\n')
           .map(l => l.trim())
@@ -159,20 +197,23 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       
       if (promptLines.length === 0) return groupWordsByTiming(cleanAligned);
 
-      // Step 3: Tokenize the prompt
-      type PromptToken = { text: string; lineIndex: number };
+      type PromptToken = { text: string; lineIndex: number; isLineStart: boolean };
       const tokens: PromptToken[] = [];
       
       promptLines.forEach((line, idx) => {
-          // Robust tokenization
           const words = line.split(/\s+/).map(cleanStringForMatch).filter(w => w.length > 0);
-          words.forEach(w => tokens.push({ text: w, lineIndex: idx }));
+          words.forEach((w, wIdx) => tokens.push({ 
+              text: w, 
+              lineIndex: idx,
+              isLineStart: wIdx === 0 
+          }));
       });
 
       const groups: AlignedWord[][] = [];
       let currentGroup: AlignedWord[] = [];
       let currentLineIndex = 0;
       let tokenPtr = 0;
+      let wordsSinceLastMatch = 0; 
 
       for (let i = 0; i < cleanAligned.length; i++) {
           const wordObj = cleanAligned[i];
@@ -184,36 +225,67 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           }
 
           let bestMatchOffset = -1;
-          const MAX_LOOKAHEAD = 200; // Deep search window to handle skipped sections
+          
+          // Adaptive Lookahead: If lost (>4 words unmatched), expand search window massively
+          const isLost = wordsSinceLastMatch > 4; 
+          const MAX_LOOKAHEAD = isLost ? 1000 : 200; 
+          
           const searchLimit = Math.min(tokens.length - tokenPtr, MAX_LOOKAHEAD);
 
           for (let lookahead = 0; lookahead < searchLimit; lookahead++) {
               const target = tokens[tokenPtr + lookahead];
-              const isMatch = target.text === cleanWord || target.text.includes(cleanWord) || cleanWord.includes(target.text);
+              
+              const isExact = target.text === cleanWord;
+              // If not lost, allow partial matches. If lost, require strict exactness to avoid false anchoring.
+              const isMatch = isExact || (!isLost && (target.text.includes(cleanWord) || cleanWord.includes(target.text)));
 
               if (isMatch) {
-                  // A) Trust close matches immediately
-                  if (lookahead < 5) {
-                      bestMatchOffset = lookahead;
-                      break; 
-                  }
-                  
-                  // B) For distant matches, verify context (next word) to prevent jumping to false positives
-                  if (i + 1 < cleanAligned.length && tokenPtr + lookahead + 1 < tokens.length) {
+                  // CONTEXT VERIFICATION
+                  // Look ahead in audio to see if subsequent words also match subsequent tokens
+                  let contextMatch = false;
+                  if (i + 1 < cleanAligned.length) {
                       const nextAudio = cleanStringForMatch(cleanAligned[i+1].word);
-                      const nextToken = tokens[tokenPtr + lookahead + 1].text;
-                      
-                      // If next word also matches, it's a strong anchor
-                      if (nextAudio && (nextToken === nextAudio || nextToken.includes(nextAudio) || nextAudio.includes(nextToken))) {
-                          bestMatchOffset = lookahead;
-                          break;
+                      if (nextAudio) {
+                           // Check next 3 tokens to allow for skipped words in prompt or audio
+                           for (let offset = 1; offset <= 3; offset++) {
+                               if (tokenPtr + lookahead + offset < tokens.length) {
+                                   const nextToken = tokens[tokenPtr + lookahead + offset].text;
+                                   if (nextToken === nextAudio || nextToken.includes(nextAudio) || nextAudio.includes(nextToken)) {
+                                       contextMatch = true;
+                                       break;
+                                   }
+                               }
+                           }
+                      } else {
+                          // End of audio words, weak context but acceptable if exact
+                          contextMatch = true;
                       }
                   }
+
+                  // DECISION LOGIC
                   
-                  // C) Trust long unique words
-                  if (cleanWord.length > 4) {
+                  // 1. Immediate flow (very close match) - High Trust
+                  if (lookahead < 3) {
                       bestMatchOffset = lookahead;
                       break;
+                  }
+
+                  // 2. Recovery / Jump Logic
+                  const isCommon = cleanWord.length < 3 || STOP_WORDS.has(cleanWord);
+                  
+                  // If we have context verification, we jump even if it's far
+                  if (contextMatch) {
+                      bestMatchOffset = lookahead;
+                      break;
+                  }
+                  
+                  // If we are LOST, we look for strong anchors
+                  if (isLost && !isCommon && isExact) {
+                       // Prefer jumping to the start of a new line
+                       if (target.isLineStart || lookahead < 20) {
+                           bestMatchOffset = lookahead;
+                           break;
+                       }
                   }
               }
           }
@@ -221,15 +293,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           if (bestMatchOffset !== -1) {
               const target = tokens[tokenPtr + bestMatchOffset];
               
-              // Check if we advanced to a new line
+              // Handle Line Breaks
               if (target.lineIndex > currentLineIndex) {
                   if (currentGroup.length > 0) groups.push(currentGroup);
                   currentGroup = [];
                   currentLineIndex = target.lineIndex;
               }
 
-              // Advance pointer past the match
+              // Advance Sync Pointer
               tokenPtr += bestMatchOffset + 1;
+              wordsSinceLastMatch = 0; 
+          } else {
+              wordsSinceLastMatch++;
           }
 
           currentGroup.push(wordObj);
@@ -244,7 +319,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
    * Robust grouping based on timing gaps (Fallback).
    */
   const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
-      // Pass aligned words through the cleaner first to ensure no partial/split tags remain
       const cleanAligned = getCleanAlignedWords(aligned); 
       if (cleanAligned.length === 0) return [];
 
