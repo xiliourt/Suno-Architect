@@ -41,6 +41,8 @@ const ASPECT_RATIOS = {
   "4:3": { width: 1024, height: 768, label: "Classic (4:3)" }
 };
 
+const STOP_WORDS = new Set(['the', 'and', 'a', 'to', 'of', 'in', 'it', 'is', 'that', 'you', 'he', 'she', 'was', 'for', 'on', 'are', 'as', 'with', 'his', 'they', 'at', 'be', 'this', 'have', 'from', 'or', 'one', 'had', 'by', 'word', 'but', 'not', 'what', 'all', 'were', 'we', 'when', 'your', 'can', 'said', 'there', 'use', 'an', 'each', 'which', 'she', 'do', 'how', 'their', 'if', 'will', 'up', 'other', 'about', 'out', 'many', 'then', 'them', 'these', 'so', 'some', 'her', 'would', 'make', 'like', 'him', 'into', 'time', 'has', 'look', 'two', 'more', 'write', 'go', 'see', 'number', 'no', 'way', 'could', 'people', 'my', 'than', 'first', 'water', 'been', 'call', 'who', 'oil', 'its', 'now', 'find']);
+
 const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCookie, onUpdateClip, apiKey, geminiModel }) => {
   // Selection State
   const [selectedClipId, setSelectedClipId] = useState<string>('');
@@ -70,16 +72,19 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const [isPreparing, setIsPreparing] = useState(false);
   const [isGrouping, setIsGrouping] = useState(false);
   const [progress, setProgress] = useState(0); // Playback progress
+  const [duration, setDuration] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
   
   const audioContextRef = useRef<AudioContext | null>(null);
 
   /**
-   * Enhanced Helper: Filter out meta words, handling split tags across multiple tokens.
-   * Uses character-level state machine to handle cases like:
-   * 1. "[Verse 1] Feel" -> "Feel"
-   * 2. "0:22 [Intro] [" -> "0:23 Downtempo" -> "0:24 ]" (All removed)
+   * Enhanced Helper: Filter out meta words AND repair fragmented tokens.
+   * Handles:
+   * 1. "[Verse]" tags removal
+   * 2. "I" + "'" + "m" -> "I'm" merging
    */
   const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
+      // Phase 1: Strip Brackets/Tags
       const clean: AlignedWord[] = [];
       let bracketDepth = 0;
 
@@ -103,8 +108,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               }
           }
           
-          // Only keep words that have actual content after stripping tags
-          // We trim to ensure we don't keep just whitespace
           const trimmed = cleanWordBuilder.trim();
           
           if (trimmed.length > 0) {
@@ -114,7 +117,44 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               });
           }
       }
-      return clean;
+
+      // Phase 2: Repair Fragmentation (Phantom Spaces)
+      if (clean.length === 0) return [];
+
+      const fixed: AlignedWord[] = [];
+      let current = clean[0];
+
+      for (let i = 1; i < clean.length; i++) {
+           const next = clean[i];
+           const currText = current.word.trim();
+           const nextText = next.word.trim();
+           
+           // Heuristic: Merge if one side is an apostrophe or connected by one
+           // e.g. "I" + "'m" OR "I'" + "m" OR "gon" + "na" (though gonna is usually fine, ' is the main culprit)
+           const isFragment = 
+                /['’]$/.test(currText) || 
+                /^['’]/.test(nextText) ||
+                /^['’]+$/.test(currText) ||
+                /^['’]+$/.test(nextText);
+           
+           // Ensure they are close in time (gap < 0.5s) to avoid merging across actual pauses
+           const gap = next.start_s - current.end_s;
+           
+           if (isFragment && gap < 0.5) {
+               // Merge into current
+               current = {
+                   ...current,
+                   word: currText + nextText, // Concatenate
+                   end_s: next.end_s // Extend duration
+               };
+           } else {
+               fixed.push(current);
+               current = next;
+           }
+      }
+      fixed.push(current);
+      
+      return fixed;
   };
 
   /**
@@ -133,23 +173,23 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   };
 
   const cleanStringForMatch = (s: string) => {
+      if (!s) return "";
       try {
-          return s.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+          // Remove apostrophes and non-alphanumeric chars for looser matching
+          return s.toLowerCase().replace(/['’]/g, '').replace(/[^\p{L}\p{N}]/gu, '');
       } catch (e) {
-          return s.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "");
+          return s.toLowerCase().replace(/['".,/#!$%^&*;:{}=\-_`~()]/g, "");
       }
   };
 
   /**
    * Algorithm: Match Aligned Words to Prompt Structure.
-   * This uses the "Lyric Source" textbox as the source of truth for line breaks.
+   * "Lost Mode" implemented to fallback to sync if drifting.
    */
   const matchWordsToPrompt = (aligned: AlignedWord[], promptText: string): AlignedWord[][] => {
-      // Step 1: Clean the aligned words using robust depth check
       const cleanAligned = getCleanAlignedWords(aligned);
       if (cleanAligned.length === 0) return [];
 
-      // Step 2: Prepare Prompt Lines (Structure Source)
       const promptLines = stripMetaTags(promptText)
           .split('\n')
           .map(l => l.trim())
@@ -157,20 +197,23 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       
       if (promptLines.length === 0) return groupWordsByTiming(cleanAligned);
 
-      // Step 3: Tokenize the prompt
-      type PromptToken = { text: string; lineIndex: number };
+      type PromptToken = { text: string; lineIndex: number; isLineStart: boolean };
       const tokens: PromptToken[] = [];
       
       promptLines.forEach((line, idx) => {
-          // Robust tokenization
           const words = line.split(/\s+/).map(cleanStringForMatch).filter(w => w.length > 0);
-          words.forEach(w => tokens.push({ text: w, lineIndex: idx }));
+          words.forEach((w, wIdx) => tokens.push({ 
+              text: w, 
+              lineIndex: idx,
+              isLineStart: wIdx === 0 
+          }));
       });
 
       const groups: AlignedWord[][] = [];
       let currentGroup: AlignedWord[] = [];
       let currentLineIndex = 0;
       let tokenPtr = 0;
+      let wordsSinceLastMatch = 0; 
 
       for (let i = 0; i < cleanAligned.length; i++) {
           const wordObj = cleanAligned[i];
@@ -182,36 +225,67 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           }
 
           let bestMatchOffset = -1;
-          const MAX_LOOKAHEAD = 200; // Deep search window to handle skipped sections
+          
+          // Adaptive Lookahead: If lost (>4 words unmatched), expand search window massively
+          const isLost = wordsSinceLastMatch > 4; 
+          const MAX_LOOKAHEAD = isLost ? 1000 : 200; 
+          
           const searchLimit = Math.min(tokens.length - tokenPtr, MAX_LOOKAHEAD);
 
           for (let lookahead = 0; lookahead < searchLimit; lookahead++) {
               const target = tokens[tokenPtr + lookahead];
-              const isMatch = target.text === cleanWord || target.text.includes(cleanWord) || cleanWord.includes(target.text);
+              
+              const isExact = target.text === cleanWord;
+              // If not lost, allow partial matches. If lost, require strict exactness to avoid false anchoring.
+              const isMatch = isExact || (!isLost && (target.text.includes(cleanWord) || cleanWord.includes(target.text)));
 
               if (isMatch) {
-                  // A) Trust close matches immediately
-                  if (lookahead < 5) {
-                      bestMatchOffset = lookahead;
-                      break; 
-                  }
-                  
-                  // B) For distant matches, verify context (next word) to prevent jumping to false positives
-                  if (i + 1 < cleanAligned.length && tokenPtr + lookahead + 1 < tokens.length) {
+                  // CONTEXT VERIFICATION
+                  // Look ahead in audio to see if subsequent words also match subsequent tokens
+                  let contextMatch = false;
+                  if (i + 1 < cleanAligned.length) {
                       const nextAudio = cleanStringForMatch(cleanAligned[i+1].word);
-                      const nextToken = tokens[tokenPtr + lookahead + 1].text;
-                      
-                      // If next word also matches, it's a strong anchor
-                      if (nextAudio && (nextToken === nextAudio || nextToken.includes(nextAudio) || nextAudio.includes(nextToken))) {
-                          bestMatchOffset = lookahead;
-                          break;
+                      if (nextAudio) {
+                           // Check next 3 tokens to allow for skipped words in prompt or audio
+                           for (let offset = 1; offset <= 3; offset++) {
+                               if (tokenPtr + lookahead + offset < tokens.length) {
+                                   const nextToken = tokens[tokenPtr + lookahead + offset].text;
+                                   if (nextToken === nextAudio || nextToken.includes(nextAudio) || nextAudio.includes(nextToken)) {
+                                       contextMatch = true;
+                                       break;
+                                   }
+                               }
+                           }
+                      } else {
+                          // End of audio words, weak context but acceptable if exact
+                          contextMatch = true;
                       }
                   }
+
+                  // DECISION LOGIC
                   
-                  // C) Trust long unique words
-                  if (cleanWord.length > 4) {
+                  // 1. Immediate flow (very close match) - High Trust
+                  if (lookahead < 3) {
                       bestMatchOffset = lookahead;
                       break;
+                  }
+
+                  // 2. Recovery / Jump Logic
+                  const isCommon = cleanWord.length < 3 || STOP_WORDS.has(cleanWord);
+                  
+                  // If we have context verification, we jump even if it's far
+                  if (contextMatch) {
+                      bestMatchOffset = lookahead;
+                      break;
+                  }
+                  
+                  // If we are LOST, we look for strong anchors
+                  if (isLost && !isCommon && isExact) {
+                       // Prefer jumping to the start of a new line
+                       if (target.isLineStart || lookahead < 20) {
+                           bestMatchOffset = lookahead;
+                           break;
+                       }
                   }
               }
           }
@@ -219,15 +293,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           if (bestMatchOffset !== -1) {
               const target = tokens[tokenPtr + bestMatchOffset];
               
-              // Check if we advanced to a new line
+              // Handle Line Breaks
               if (target.lineIndex > currentLineIndex) {
                   if (currentGroup.length > 0) groups.push(currentGroup);
                   currentGroup = [];
                   currentLineIndex = target.lineIndex;
               }
 
-              // Advance pointer past the match
+              // Advance Sync Pointer
               tokenPtr += bestMatchOffset + 1;
+              wordsSinceLastMatch = 0; 
+          } else {
+              wordsSinceLastMatch++;
           }
 
           currentGroup.push(wordObj);
@@ -242,7 +319,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
    * Robust grouping based on timing gaps (Fallback).
    */
   const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
-      // Pass aligned words through the cleaner first to ensure no partial/split tags remain
       const cleanAligned = getCleanAlignedWords(aligned); 
       if (cleanAligned.length === 0) return [];
 
@@ -423,6 +499,33 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           alert("Failed to group lines with AI. Kept prompt-based grouping.");
       } finally {
           setIsGrouping(false);
+      }
+  };
+
+  const formatTime = (seconds: number) => {
+      if (!seconds || isNaN(seconds)) return "0:00";
+      const m = Math.floor(seconds / 60);
+      const s = Math.floor(seconds % 60);
+      return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const time = parseFloat(e.target.value);
+      if (audioRef.current) {
+          audioRef.current.currentTime = time;
+          setProgress(time);
+      }
+  };
+
+  const togglePlay = () => {
+      if (audioRef.current) {
+          if (audioRef.current.paused) {
+              audioRef.current.play();
+              setIsPlaying(true);
+          } else {
+              audioRef.current.pause();
+              setIsPlaying(false);
+          }
       }
   };
 
@@ -1173,6 +1276,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                             src={`https://cdn1.suno.ai/${selectedClipId}.mp3`}
                             crossOrigin="anonymous" // CRITICAL FOR RECORDING
                             className="w-full h-8"
+                            onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+                            onPlay={() => setIsPlaying(true)}
+                            onPause={() => setIsPlaying(false)}
+                            onEnded={() => setIsPlaying(false)}
                          />
                      </div>
 
@@ -1240,47 +1347,50 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                              </div>
                          )}
                      </div>
-                     <div className="flex justify-between items-center text-xs text-slate-500 font-mono bg-slate-900/50 p-2 rounded-lg border border-slate-800">
-                         <span>{ASPECT_RATIOS[aspectRatio].label} • {ASPECT_RATIOS[aspectRatio].width}x{ASPECT_RATIOS[aspectRatio].height} • 30fps</span>
-                         <div className="flex items-center gap-4">
-                             {audioRef.current && (
-                                <span className="text-purple-400">
-                                    {Math.floor(progress / 60)}:{(Math.floor(progress) % 60).toString().padStart(2, '0')} 
-                                    / 
-                                    {Math.floor(audioRef.current.duration / 60)}:{(Math.floor(audioRef.current.duration) % 60).toString().padStart(2, '0')}
-                                </span>
-                             )}
-                             <span>{isRendering ? 'RENDERING' : 'PREVIEW'}</span>
-                         </div>
-                     </div>
                      
-                     {/* Audio Controls for Preview */}
-                     <div className="flex gap-2">
-                        <button 
-                            onClick={() => {
-                                if(audioRef.current) {
-                                    if(audioRef.current.paused) audioRef.current.play();
-                                    else audioRef.current.pause();
-                                }
-                            }}
-                            className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl border border-slate-700 transition-colors flex items-center justify-center gap-2"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                                <path fillRule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clipRule="evenodd" />
-                            </svg>
-                            Play / Pause
-                        </button>
-                        <button 
-                            onClick={() => {
-                                if(audioRef.current) audioRef.current.currentTime = 0;
-                            }}
-                            className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 px-6 rounded-xl border border-slate-700 transition-colors"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-                                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                                <path d="M3 3v5h5" />
-                            </svg>
-                        </button>
+                     {/* Player Controls */}
+                     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                         {/* Scrubber */}
+                         <div className="relative group">
+                             <input 
+                                type="range" 
+                                min={0} 
+                                max={duration || 100}
+                                value={progress}
+                                onChange={handleSeek}
+                                className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                style={{
+                                    background: `linear-gradient(to right, #a855f7 ${(progress / (duration || 1)) * 100}%, #1e293b ${(progress / (duration || 1)) * 100}%)`
+                                }}
+                             />
+                         </div>
+
+                         <div className="flex items-center justify-between">
+                             <div className="flex items-center gap-4">
+                                 <button 
+                                     onClick={togglePlay}
+                                     className="w-10 h-10 flex items-center justify-center rounded-full bg-white text-black hover:bg-purple-400 transition-colors"
+                                 >
+                                     {isPlaying ? (
+                                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                                            <path fillRule="evenodd" d="M6.75 5.25a.75.75 0 01.75-.75H9a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H7.5a.75.75 0 01-.75-.75V5.25zm7.5 0A.75.75 0 0115 4.5h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H15a.75.75 0 01-.75-.75V5.25z" clipRule="evenodd" />
+                                         </svg>
+                                     ) : (
+                                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 ml-0.5">
+                                            <path fillRule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clipRule="evenodd" />
+                                         </svg>
+                                     )}
+                                 </button>
+                                 
+                                 <div className="text-xs font-mono text-slate-400">
+                                     <span className="text-white">{formatTime(progress)}</span> / {formatTime(duration)}
+                                 </div>
+                             </div>
+
+                             <div className="text-xs text-slate-600 font-mono hidden sm:block">
+                                 {ASPECT_RATIOS[aspectRatio].label} • {isRendering ? 'RENDERING' : 'PREVIEW'}
+                             </div>
+                         </div>
                      </div>
                  </div>
              </div>
