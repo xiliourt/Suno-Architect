@@ -3,13 +3,16 @@ import InputSection from './components/InputSection';
 import OutputSection from './components/OutputSection';
 import { Header } from './components/Header';
 import { generateSunoPrompt } from './services/geminiService';
-import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings, ViewMode } from './types';
+import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings, ViewMode, AIProviderConfig } from './types';
 import { DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS, buildKnowledgeBase, GET_PROMPT_V1 } from './constants';
+import { validateProviderConfig } from './services/providers/providerFactory';
 import Footer from './components/Footer';
 import SunoSettingsModal from './components/SunoSettingsModal';
+import { ProviderSettingsModal } from './components/ProviderSettingsModal';
 import { getSunoCredits, updateSunoMetadata, getSunoFeed } from './services/sunoApi';
 import HistorySection from './components/HistorySection';
 import VisualizerSection from './components/VisualizerSection';
+import { getApiKey, saveApiKeyForProvider } from './utils/apiKeyStorage';
 
 const App: React.FC = () => {
   const [state, setState] = useState<GenerationState>({
@@ -34,14 +37,99 @@ const App: React.FC = () => {
   const [customApiKey, setCustomApiKey] = useState('');
   const [isKeyValid, setIsKeyValid] = useState(false);
   
-  // Gemini Model State
+  // Provider Configuration State
+  const [providerConfig, setProviderConfig] = useState<AIProviderConfig>(() => {
+    try {
+      const saved = localStorage.getItem('ai_provider_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Validate that it has required fields
+        if (parsed.type) {
+          const providerType = parsed.type as 'gemini' | 'openrouter' | 'openapi';
+          
+          // Load API key from separate storage for this provider
+          const apiKey = getApiKey(providerType);
+          
+          // Load OpenAPI settings from separate storage if available
+          const openApiSettings = localStorage.getItem('ai_provider_openapi_settings');
+          if (openApiSettings && providerType === 'openapi') {
+            try {
+              const openApiParsed = JSON.parse(openApiSettings);
+              const baseUrl = parsed.baseUrl || openApiParsed.baseUrl;
+              return {
+                ...parsed,
+                apiKey: apiKey || parsed.apiKey, // Use stored API key if available, fallback to old config
+                baseUrl: baseUrl ? baseUrl.replace(/\/+$/, '') : baseUrl,
+                authHeader: parsed.authHeader || openApiParsed.authHeader,
+                authPrefix: parsed.authPrefix !== undefined ? parsed.authPrefix : openApiParsed.authPrefix,
+              };
+            } catch (e) {
+              console.warn("Failed to parse OpenAPI settings", e);
+            }
+          }
+          
+          // Normalize baseUrl if present
+          if (parsed.baseUrl) {
+            parsed.baseUrl = parsed.baseUrl.replace(/\/+$/, '');
+          }
+          
+          return {
+            ...parsed,
+            apiKey: apiKey || parsed.apiKey, // Use stored API key if available, fallback to old config
+          };
+        }
+      }
+    } catch (e) {
+      console.error("Failed to parse provider config from localStorage", e);
+    }
+    
+    // Load saved OpenAPI settings if available
+    let savedOpenApiSettings: Partial<AIProviderConfig> = {};
+    try {
+      const openApiSettings = localStorage.getItem('ai_provider_openapi_settings');
+      if (openApiSettings) {
+        savedOpenApiSettings = JSON.parse(openApiSettings);
+      }
+    } catch (e) {
+      console.warn("Failed to parse saved OpenAPI settings", e);
+    }
+    
+    // Default to Gemini with values from .env or defaults
+    const envProviderType = (import.meta.env.VITE_AI_PROVIDER_TYPE || 'gemini') as 'gemini' | 'openrouter' | 'openapi';
+    const envModel = import.meta.env.VITE_AI_PROVIDER_MODEL || 'gemini-3-flash-preview';
+    const envApiKey = getApiKey(envProviderType);
+    const envBaseUrl = import.meta.env.VITE_OPENAPI_BASE_URL || '';
+
+    return {
+      type: envProviderType,
+      apiKey: envApiKey,
+      model: envModel,
+      baseUrl: envProviderType === 'openapi' 
+        ? ((envBaseUrl || savedOpenApiSettings.baseUrl || '').replace(/\/+$/, '') || undefined)
+        : undefined,
+      authHeader: envProviderType === 'openapi' 
+        ? (savedOpenApiSettings.authHeader || 'x-litellm-api-key')
+        : undefined,
+      authPrefix: envProviderType === 'openapi' 
+        ? (savedOpenApiSettings.authPrefix !== undefined ? savedOpenApiSettings.authPrefix : '')
+        : undefined,
+    };
+  });
+
+  const [isProviderModalOpen, setIsProviderModalOpen] = useState(false);
+
+  // Legacy Gemini Model State (for backward compatibility)
   const [geminiModel, setGeminiModel] = useState<string>(() => {
-      return localStorage.getItem('gemini_model') || 'gemini-3-flash-preview';
+      return localStorage.getItem('gemini_model') || providerConfig.model || 'gemini-3-flash-preview';
   });
 
   const handleGeminiModelChange = (model: string) => {
       setGeminiModel(model);
       localStorage.setItem('gemini_model', model);
+      // Also update provider config if using Gemini
+      if (providerConfig.type === 'gemini') {
+        setProviderConfig({ ...providerConfig, model });
+      }
   };
   
   // Suno Configuration State
@@ -101,6 +189,46 @@ const App: React.FC = () => {
   useEffect(() => {
       localStorage.setItem('suno_prompt_settings', JSON.stringify(promptSettings));
   }, [promptSettings]);
+
+  // Load API key when provider type changes (only if not already set)
+  useEffect(() => {
+    // Only load if API key is not set or is different from stored
+    const storedApiKey = getApiKey(providerConfig.type);
+    if (storedApiKey && (!providerConfig.apiKey || storedApiKey !== providerConfig.apiKey)) {
+      setProviderConfig(prev => ({ ...prev, apiKey: storedApiKey }));
+    }
+  }, [providerConfig.type]);
+
+  // Persist provider config and API keys separately
+  useEffect(() => {
+    // Save API key separately for the current provider
+    if (providerConfig.apiKey) {
+      saveApiKeyForProvider(providerConfig.type, providerConfig.apiKey);
+    }
+    
+    // Save config without API key (for privacy and to avoid overwriting)
+    const configToSave = {
+      ...providerConfig,
+      apiKey: undefined, // Don't store API key in config, it's stored separately
+    };
+    localStorage.setItem('ai_provider_config', JSON.stringify(configToSave));
+    
+    // Store OpenAPI-specific settings separately so they persist when switching providers
+    if (providerConfig.type === 'openapi') {
+      const openApiSettings = {
+        baseUrl: providerConfig.baseUrl,
+        authHeader: providerConfig.authHeader,
+        authPrefix: providerConfig.authPrefix,
+      };
+      localStorage.setItem('ai_provider_openapi_settings', JSON.stringify(openApiSettings));
+    }
+  }, [providerConfig]);
+
+  // Validate provider config whenever it changes
+  useEffect(() => {
+    const isValid = validateProviderConfig(providerConfig);
+    setIsKeyValid(isValid);
+  }, [providerConfig]);
 
   const fetchAndMergeSunoHistory = async (cookie: string) => {
     try {
@@ -338,8 +466,20 @@ const App: React.FC = () => {
   const handleGenerate = async (prompt: string) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null, result: null }));
     try {
-      // Pass the customized system prompt and gemini model
-      const result = await generateSunoPrompt(prompt, customApiKey, promptSettings.customSystemPrompt, geminiModel);
+      // Create provider config with API key override if provided (for backward compatibility)
+      // Only override if customApiKey is actually set (not empty string)
+      const config: AIProviderConfig = {
+        ...providerConfig,
+        apiKey: customApiKey ? customApiKey : providerConfig.apiKey,
+        model: providerConfig.model || geminiModel, // Fallback to legacy geminiModel
+      };
+      
+      // Validate config before generating
+      if (!validateProviderConfig(config)) {
+        throw new Error(`Invalid ${config.type} configuration. Please check your API key and settings.`);
+      }
+      
+      const result = await generateSunoPrompt(prompt, config, promptSettings.customSystemPrompt);
       setState({ isLoading: false, error: null, result });
       
       // Auto-save to history as draft
@@ -388,7 +528,7 @@ const App: React.FC = () => {
                     history={history}
                     sunoCookie={sunoCookie}
                     onUpdateClip={handleUpdateClip}
-                    apiKey={customApiKey}
+                    providerConfig={providerConfig}
                   />
               );
           case 'generator':
@@ -407,7 +547,10 @@ const App: React.FC = () => {
                         <InputSection 
                             onGenerate={handleGenerate} 
                             isLoading={state.isLoading} 
-                            apiKeyValid={isKeyValid} 
+                            apiKeyValid={isKeyValid}
+                            providerConfig={providerConfig}
+                            onProviderConfigChange={setProviderConfig}
+                            onOpenProviderSettings={() => setIsProviderModalOpen(true)}
                         />
                         {state.error && (
                             <div className="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 text-sm">
@@ -473,11 +616,13 @@ const App: React.FC = () => {
         onKeyUpdate={setCustomApiKey} 
         onValidationChange={setIsKeyValid}
         onOpenSunoSettings={() => setIsSunoModalOpen(true)}
+        onOpenProviderSettings={() => setIsProviderModalOpen(true)}
         sunoCredits={sunoCredits}
         sunoModel={sunoModel}
         onModelChange={handleModelChange}
         geminiModel={geminiModel}
         onGeminiModelChange={handleGeminiModelChange}
+        providerConfig={providerConfig}
       />
 
       <SunoSettingsModal 
@@ -488,6 +633,38 @@ const App: React.FC = () => {
         initialModel={sunoModel}
         initialPromptSettings={promptSettings}
         currentCredits={sunoCredits}
+      />
+
+      <ProviderSettingsModal
+        isOpen={isProviderModalOpen}
+        onClose={() => setIsProviderModalOpen(false)}
+        onSave={(config) => {
+          // Load saved OpenAPI settings when switching to OpenAPI
+          if (config.type === 'openapi') {
+            try {
+              const savedOpenApi = localStorage.getItem('ai_provider_openapi_settings');
+              if (savedOpenApi) {
+                const parsed = JSON.parse(savedOpenApi);
+                // Merge saved settings with current config, prioritizing current config
+                config = {
+                  ...config,
+                  baseUrl: config.baseUrl || parsed.baseUrl,
+                  authHeader: config.authHeader || parsed.authHeader,
+                  authPrefix: config.authPrefix !== undefined ? config.authPrefix : parsed.authPrefix,
+                };
+              }
+            } catch (e) {
+              console.warn("Failed to load saved OpenAPI settings", e);
+            }
+          }
+          
+          setProviderConfig(config);
+          // Update legacy geminiModel if switching to/from Gemini
+          if (config.type === 'gemini' && config.model) {
+            setGeminiModel(config.model);
+          }
+        }}
+        initialConfig={providerConfig}
       />
 
       {/* View Switcher */}
