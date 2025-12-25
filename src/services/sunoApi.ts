@@ -12,11 +12,7 @@ export const getSunoCredits = async (cookie: string): Promise<number> => {
         };
 
         const trimmedCookie = cookie.trim();
-        if (trimmedCookie.startsWith("ey")) {
-             headers["Authorization"] = `Bearer ${trimmedCookie}`;
-        } else {
-             headers["Authorization"] = `Bearer ${trimmedCookie}`;
-        }
+        headers["Authorization"] = `Bearer ${trimmedCookie}`;
 
         const response = await fetch(BILLING_ENDPOINT, {
             method: "GET",
@@ -48,11 +44,7 @@ export const getSunoFeed = async (cookie: string): Promise<any> => {
         };
 
         const trimmedCookie = cookie.trim();
-        if (trimmedCookie.startsWith("ey")) {
-             headers["Authorization"] = `Bearer ${trimmedCookie}`;
-        } else {
-             headers["Authorization"] = `Bearer ${trimmedCookie}`;
-        }
+        headers["Authorization"] = `Bearer ${trimmedCookie}`;
 
         const response = await fetch(FEED_ENDPOINT, {
             method: "GET",
@@ -81,11 +73,7 @@ export const getLyricAlignment = async (songId: string, cookie: string): Promise
         };
 
         const trimmedCookie = cookie.trim();
-        if (trimmedCookie.startsWith("ey")) {
-             headers["Authorization"] = `Bearer ${trimmedCookie}`;
-        } else {
-             headers["Authorization"] = `Bearer ${trimmedCookie}`;
-        }
+        headers["Authorization"] = `Bearer ${trimmedCookie}`;
 
         const response = await fetch(ENDPOINT, {
             method: "GET",
@@ -104,6 +92,35 @@ export const getLyricAlignment = async (songId: string, cookie: string): Promise
     }
 };
 
+export const getSunoClip = async (clipId: string, cookie: string): Promise<any> => {
+    if (!cookie) throw new Error("No cookie provided");
+
+    const ENDPOINT = `https://studio-api.prod.suno.com/api/clip/${clipId}`;
+
+    try {
+        const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+        };
+
+        const trimmedCookie = cookie.trim();
+        headers["Authorization"] = `Bearer ${trimmedCookie}`;
+
+        const response = await fetch(ENDPOINT, {
+            method: "GET",
+            headers: headers
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch clip. Status: ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error("Failed to get suno clip:", error);
+        throw error;
+    }
+};
+
 export const triggerSunoGeneration = async (
   data: ParsedSunoOutput, 
   cookie: string,
@@ -114,7 +131,7 @@ export const triggerSunoGeneration = async (
   }
 
   // Use the proxy endpoint to avoid CORS issues and manage headers
-  const API_ENDPOINT = "/api/suno-proxy";
+  const API_ENDPOINT = "https://dev-suno-architect.dylanacc009.workers.dev/api/suno-proxy";
   
   // Normalize 0-100 to 0.0-1.0
   const weirdness = typeof data.weirdness === 'number' ? data.weirdness / 100 : 0.5;

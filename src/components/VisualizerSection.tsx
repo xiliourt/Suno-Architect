@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { SunoClip, AlignedWord } from '../types';
-import { getLyricAlignment } from '../services/sunoApi';
+import { getLyricAlignment, getSunoClip } from '../services/sunoApi';
 import { groupLyricsByLines } from '../services/geminiService';
 // @ts-ignore
 import { Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget } from 'webm-muxer';
@@ -326,12 +326,20 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   useEffect(() => {
     if (!clipData) return;
     let url = clipData.imageLargeUrl || clipData.imageUrl || `https://cdn2.suno.ai/image_large_${clipData.id}.jpeg`;
+    
+    // Use a Ref to ensure we only timestamp once per unique URL to prevent infinite reloads
+    // Note: We don't implement full ref caching here for simplicity, but we rely on clipData stability.
+    // If clipData is recreated repeatedly, this effect fires repeatedly.
+    // The previous bug was causing clipData to be recreated on every render loop.
+    // With loop fixed, we can safely timestamp if needed, but only if URL implies caching needs.
     if (url.includes('suno.ai') && !url.includes('?')) {
         url += `?t=${Date.now()}`;
     }
+    
     setImgSrc(url);
     if (!lyricSource) {
-        const raw = clipData.originalData?.lyricsAlone || clipData.metadata?.prompt || "";
+        // Fallback if not set by main load logic
+        const raw = clipData.metadata?.prompt || clipData.originalData?.lyricsAlone || "";
         setLyricSource(raw);
     }
   }, [clipData]);
@@ -340,66 +348,118 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       setImgSrc('https://placehold.co/1080x1080/1e293b/475569?text=No+Cover');
   };
 
-  // Load Clip Data
+  // Load Clip Data with API Fetch
   useEffect(() => {
     if (!selectedClipId) return;
     setLines([]); 
+    setApplyStatus('idle');
 
-    const fromHistory = history.find(c => c.id === selectedClipId);
-    if (fromHistory) {
-        setClipData(fromHistory);
-        const rawLyrics = fromHistory.originalData?.lyricsAlone || fromHistory.metadata?.prompt || "";
-        setLyricSource(rawLyrics);
+    const loadData = async () => {
+        let currentClip = history.find(c => c.id === selectedClipId);
+        let fetchedData: any = null;
 
-        if (fromHistory.alignmentData) {
-            setAlignment(fromHistory.alignmentData);
-            let autoLines;
-            if (rawLyrics) {
-                autoLines = matchWordsToPrompt(fromHistory.alignmentData, rawLyrics);
-            } else {
-                autoLines = groupWordsByTiming(fromHistory.alignmentData);
-            }
-            setLines(autoLines);
-        } else if (sunoCookie && !fromHistory.id.startsWith('draft_')) {
-             setIsPreparing(true);
-             getLyricAlignment(fromHistory.id, sunoCookie)
-                .then(res => {
-                    if(res && res.aligned_words) {
-                        setAlignment(res.aligned_words);
-                        onUpdateClip(fromHistory.id, { alignmentData: res.aligned_words });
-                        let autoLines;
-                        if(rawLyrics) {
-                             autoLines = matchWordsToPrompt(res.aligned_words, rawLyrics);
-                        } else {
-                             autoLines = groupWordsByTiming(res.aligned_words);
-                        }
-                        setLines(autoLines);
-                    }
-                })
-                .catch(err => console.error("Failed to fetch alignment for visualizer", err))
-                .finally(() => setIsPreparing(false));
+        // Try to fetch fresh metadata if cookie exists and not a draft
+        if (sunoCookie && !selectedClipId.startsWith('draft_')) {
+             try {
+                 setIsPreparing(true);
+                 fetchedData = await getSunoClip(selectedClipId, sunoCookie);
+             } catch (e) {
+                 console.warn("Could not fetch clip details, using local/fallback", e);
+             }
         }
-    } else {
-        setClipData({
-            id: selectedClipId,
-            title: '', 
-            created_at: new Date().toISOString(),
-            model_name: 'Unknown',
-            imageUrl: `https://cdn2.suno.ai/image_large_${selectedClipId}.jpeg`,
-            metadata: { tags: '', prompt: '' }
-        });
-        setLyricSource(""); 
+
+        if (fetchedData) {
+            const meta = fetchedData.metadata || {};
+            const prompt = meta.prompt || "";
+            const tags = meta.tags || "";
+            
+            // Construct enhanced clip
+            currentClip = {
+                id: fetchedData.id,
+                title: fetchedData.title || (currentClip?.title || 'Untitled'),
+                created_at: fetchedData.created_at || new Date().toISOString(),
+                model_name: fetchedData.model_name || 'Unknown',
+                imageUrl: fetchedData.image_url || fetchedData.image_large_url,
+                imageLargeUrl: fetchedData.image_large_url,
+                metadata: {
+                    tags: tags,
+                    prompt: prompt
+                },
+                // Preserve originalData if we had it (Architect data)
+                originalData: currentClip?.originalData || {
+                    style: tags,
+                    title: fetchedData.title || '',
+                    excludeStyles: '',
+                    advancedParams: '',
+                    vocalGender: '',
+                    weirdness: 50,
+                    styleInfluence: 50,
+                    lyricsWithTags: prompt,
+                    lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(),
+                    javascriptCode: '',
+                    fullResponse: ''
+                },
+                alignmentData: currentClip?.alignmentData 
+            };
+        } else if (!currentClip) {
+             // Fallback for manual ID if fetch failed
+             currentClip = {
+                id: selectedClipId,
+                title: '', 
+                created_at: new Date().toISOString(),
+                model_name: 'Unknown',
+                imageUrl: `https://cdn2.suno.ai/image_large_${selectedClipId}.jpeg`,
+                metadata: { tags: '', prompt: '' }
+            };
+        }
         
-        if (sunoCookie) {
-             setIsPreparing(true);
-             getLyricAlignment(selectedClipId, sunoCookie)
-                .then(res => {
-                     if(res && res.aligned_words) setAlignment(res.aligned_words);
-                })
-                .catch(err => console.error("Failed to fetch alignment for manual id", err))
-                .finally(() => setIsPreparing(false));
+        // This state update is safe because the effect dependency array is now stable
+        setClipData(currentClip);
+
+        // --- LYRIC SOURCE LOGIC ---
+        let sourceText = currentClip.metadata?.prompt || "";
+        if (!sourceText && currentClip.originalData?.lyricsAlone) {
+            sourceText = currentClip.originalData.lyricsAlone;
         }
-    }
+        setLyricSource(sourceText);
+
+        // Fetch Alignment if needed
+        let align = currentClip.alignmentData;
+        if (!align && sunoCookie && !currentClip.id.startsWith('draft_')) {
+             try {
+                 setIsPreparing(true);
+                 const res = await getLyricAlignment(currentClip.id, sunoCookie);
+                 if (res && res.aligned_words) {
+                     align = res.aligned_words;
+                     
+                     // CRITICAL FIX: Only call update if clip exists in history
+                     // Calling update on a manual ID that isn't in history causes App state to change 
+                     // (returning new array reference) which triggers this effect again -> Infinite Loop.
+                     if (history.some(h => h.id === currentClip.id)) {
+                        onUpdateClip(currentClip.id, { alignmentData: align });
+                     }
+                 }
+             } catch (e) {
+                 console.error("Alignment fetch failed", e);
+             }
+        }
+        setAlignment(align || null);
+
+        // Group Lines
+        if (align) {
+             let autoLines;
+             if (sourceText) {
+                 autoLines = matchWordsToPrompt(align, sourceText);
+             } else {
+                 autoLines = groupWordsByTiming(align);
+             }
+             setLines(autoLines);
+        }
+
+        setIsPreparing(false);
+    };
+
+    loadData();
   }, [selectedClipId, history, sunoCookie, onUpdateClip]);
 
   const handleManualLoad = () => {
