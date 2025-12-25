@@ -868,12 +868,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     // Reset to start to prevent lag artifacts at the beginning of the video
     smoothLineIdxRef.current = 0; 
 
-    // Calculate compensated smoothing factor for 30fps
-    // Standard preview is approx 60fps. Offline is 30fps.
-    // We want similar convergence speed per second of audio.
-    // Factor_30 = 1 - (1 - Factor_60)^2
-    const factor30 = 1 - Math.pow(1 - smoothingFactor, 2);
-
     let fileHandle: any = null;
     let writableStream: any = null;
 
@@ -947,8 +941,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             codec: 'vp09.00.10.08',
             width: targetWidth,
             height: targetHeight,
-            bitrate: 4_000_000, // 4Mbps
-            framerate: 30
+            bitrate: 8_000_000, // Increased bitrate for 60fps
+            framerate: 60
         });
 
         // 5. Setup Audio Encoder
@@ -965,7 +959,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         });
 
         // 6. Render Video Frames with BACKPRESSURE
-        const fps = 30;
+        const fps = 60;
         const totalFrames = Math.ceil(duration * fps);
         const ctx = canvasRef.current.getContext('2d')!;
         
@@ -1006,8 +1000,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 }
             }
 
-            // PASS OVERRIDE SMOOTHING FACTOR
-            renderFrame(ctx, targetWidth, targetHeight, t, factor30);
+            renderFrame(ctx, targetWidth, targetHeight, t);
             
             // @ts-ignore
             const frame = new VideoFrame(canvasRef.current, { timestamp: t * 1000000 });
