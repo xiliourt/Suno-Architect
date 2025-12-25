@@ -41,6 +41,14 @@ const ASPECT_RATIOS = {
   "4:3": { width: 1024, height: 768, label: "Classic (4:3)" }
 };
 
+const FONTS = [
+    { label: "Inter (Modern Sans)", value: "Inter, sans-serif" },
+    { label: "Montserrat (Geometric)", value: "Montserrat, sans-serif" },
+    { label: "Roboto (Neutral)", value: "Roboto, sans-serif" },
+    { label: "Lora (Serif)", value: "Lora, serif" },
+    { label: "Courier Prime (Mono)", value: "'Courier Prime', monospace" },
+];
+
 const STOP_WORDS = new Set(['the', 'and', 'a', 'to', 'of', 'in', 'it', 'is', 'that', 'you', 'he', 'she', 'was', 'for', 'on', 'are', 'as', 'with', 'his', 'they', 'at', 'be', 'this', 'have', 'from', 'or', 'one', 'had', 'by', 'word', 'but', 'not', 'what', 'all', 'were', 'we', 'when', 'your', 'can', 'said', 'there', 'use', 'an', 'each', 'which', 'she', 'do', 'how', 'their', 'if', 'will', 'up', 'other', 'about', 'out', 'many', 'then', 'them', 'these', 'so', 'some', 'her', 'would', 'make', 'like', 'him', 'into', 'time', 'has', 'look', 'two', 'more', 'write', 'go', 'see', 'number', 'no', 'way', 'could', 'people', 'my', 'than', 'first', 'water', 'been', 'call', 'who', 'oil', 'its', 'now', 'find']);
 
 const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCookie, onUpdateClip, apiKey, geminiModel }) => {
@@ -52,6 +60,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const [aspectRatio, setAspectRatio] = useState<keyof typeof ASPECT_RATIOS>("16:9");
   const [customBg, setCustomBg] = useState<{ url: string, type: 'image' | 'video', name: string } | null>(null);
   const [imgSrc, setImgSrc] = useState<string>('');
+
+  // Style Customization State
+  const [activeColor, setActiveColor] = useState('#e879f9');
+  const [inactiveColor, setInactiveColor] = useState('#ffffff');
+  const [inactiveOpacity, setInactiveOpacity] = useState(0.3);
+  const [fontFamily, setFontFamily] = useState('Inter, sans-serif');
+  const [smoothingFactor, setSmoothingFactor] = useState(0.1); // 0.05 (Slow) to 1.0 (Instant)
 
   // Data State
   const [clipData, setClipData] = useState<SunoClip | null>(null);
@@ -66,6 +81,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const customVideoRef = useRef<HTMLVideoElement>(null);
   const requestRef = useRef<number | null>(null);
   
+  // Smoothing Refs
+  const smoothLineIdxRef = useRef(0);
+  
   // Rendering State
   const [isRendering, setIsRendering] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
@@ -79,9 +97,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
   /**
    * Enhanced Helper: Filter out meta words AND repair fragmented tokens.
-   * Handles:
-   * 1. "[Verse]" tags removal
-   * 2. "I" + "'" + "m" -> "I'm" merging
    */
   const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
       // Phase 1: Strip Brackets/Tags
@@ -129,23 +144,19 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
            const currText = current.word.trim();
            const nextText = next.word.trim();
            
-           // Heuristic: Merge if one side is an apostrophe or connected by one
-           // e.g. "I" + "'m" OR "I'" + "m" OR "gon" + "na" (though gonna is usually fine, ' is the main culprit)
            const isFragment = 
                 /['’]$/.test(currText) || 
                 /^['’]/.test(nextText) ||
                 /^['’]+$/.test(currText) ||
                 /^['’]+$/.test(nextText);
            
-           // Ensure they are close in time (gap < 0.5s) to avoid merging across actual pauses
            const gap = next.start_s - current.end_s;
            
            if (isFragment && gap < 0.5) {
-               // Merge into current
                current = {
                    ...current,
-                   word: currText + nextText, // Concatenate
-                   end_s: next.end_s // Extend duration
+                   word: currText + nextText, 
+                   end_s: next.end_s 
                };
            } else {
                fixed.push(current);
@@ -157,15 +168,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       return fixed;
   };
 
-  /**
-   * Helper: Remove [Meta Tags] and empty lines from text to get clean lyrics.
-   */
   const stripMetaTags = (text: string): string => {
       if (!text) return "";
       return text
-          .replace(/\[[\s\S]*?\]/g, '') // Remove [Verse], [Chorus]
-          .replace(/\([\s\S]*?\)/g, '') // Remove (Ad-libs)
-          .replace(/\{[\s\S]*?\}/g, '') // Remove {Tags}
+          .replace(/\[[\s\S]*?\]/g, '')
+          .replace(/\([\s\S]*?\)/g, '')
+          .replace(/\{[\s\S]*?\}/g, '')
           .split('\n')
           .map(line => line.trim())
           .filter(line => line.length > 0)
@@ -175,17 +183,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const cleanStringForMatch = (s: string) => {
       if (!s) return "";
       try {
-          // Remove apostrophes and non-alphanumeric chars for looser matching
           return s.toLowerCase().replace(/['’]/g, '').replace(/[^\p{L}\p{N}]/gu, '');
       } catch (e) {
           return s.toLowerCase().replace(/['".,/#!$%^&*;:{}=\-_`~()]/g, "");
       }
   };
 
-  /**
-   * Algorithm: Match Aligned Words to Prompt Structure.
-   * "Lost Mode" implemented to fallback to sync if drifting.
-   */
   const matchWordsToPrompt = (aligned: AlignedWord[], promptText: string): AlignedWord[][] => {
       const cleanAligned = getCleanAlignedWords(aligned);
       if (cleanAligned.length === 0) return [];
@@ -225,28 +228,20 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           }
 
           let bestMatchOffset = -1;
-          
-          // Adaptive Lookahead: If lost (>4 words unmatched), expand search window massively
           const isLost = wordsSinceLastMatch > 4; 
           const MAX_LOOKAHEAD = isLost ? 1000 : 200; 
-          
           const searchLimit = Math.min(tokens.length - tokenPtr, MAX_LOOKAHEAD);
 
           for (let lookahead = 0; lookahead < searchLimit; lookahead++) {
               const target = tokens[tokenPtr + lookahead];
-              
               const isExact = target.text === cleanWord;
-              // If not lost, allow partial matches. If lost, require strict exactness to avoid false anchoring.
               const isMatch = isExact || (!isLost && (target.text.includes(cleanWord) || cleanWord.includes(target.text)));
 
               if (isMatch) {
-                  // CONTEXT VERIFICATION
-                  // Look ahead in audio to see if subsequent words also match subsequent tokens
                   let contextMatch = false;
                   if (i + 1 < cleanAligned.length) {
                       const nextAudio = cleanStringForMatch(cleanAligned[i+1].word);
                       if (nextAudio) {
-                           // Check next 3 tokens to allow for skipped words in prompt or audio
                            for (let offset = 1; offset <= 3; offset++) {
                                if (tokenPtr + lookahead + offset < tokens.length) {
                                    const nextToken = tokens[tokenPtr + lookahead + offset].text;
@@ -257,31 +252,20 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                }
                            }
                       } else {
-                          // End of audio words, weak context but acceptable if exact
                           contextMatch = true;
                       }
                   }
 
-                  // DECISION LOGIC
-                  
-                  // 1. Immediate flow (very close match) - High Trust
                   if (lookahead < 3) {
                       bestMatchOffset = lookahead;
                       break;
                   }
-
-                  // 2. Recovery / Jump Logic
                   const isCommon = cleanWord.length < 3 || STOP_WORDS.has(cleanWord);
-                  
-                  // If we have context verification, we jump even if it's far
                   if (contextMatch) {
                       bestMatchOffset = lookahead;
                       break;
                   }
-                  
-                  // If we are LOST, we look for strong anchors
                   if (isLost && !isCommon && isExact) {
-                       // Prefer jumping to the start of a new line
                        if (target.isLineStart || lookahead < 20) {
                            bestMatchOffset = lookahead;
                            break;
@@ -292,57 +276,40 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
           if (bestMatchOffset !== -1) {
               const target = tokens[tokenPtr + bestMatchOffset];
-              
-              // Handle Line Breaks
               if (target.lineIndex > currentLineIndex) {
                   if (currentGroup.length > 0) groups.push(currentGroup);
                   currentGroup = [];
                   currentLineIndex = target.lineIndex;
               }
-
-              // Advance Sync Pointer
               tokenPtr += bestMatchOffset + 1;
               wordsSinceLastMatch = 0; 
           } else {
               wordsSinceLastMatch++;
           }
-
           currentGroup.push(wordObj);
       }
-
       if (currentGroup.length > 0) groups.push(currentGroup);
-      
       return groups;
   };
 
-  /**
-   * Robust grouping based on timing gaps (Fallback).
-   */
   const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
       const cleanAligned = getCleanAlignedWords(aligned); 
       if (cleanAligned.length === 0) return [];
-
       const groups: AlignedWord[][] = [];
       let currentLine: AlignedWord[] = [];
-      
       const GAP_THRESHOLD = 0.5;
       const MAX_CHARS = 40; 
-
       cleanAligned.forEach((word, idx) => {
           if (idx === 0) {
               currentLine.push(word);
               return;
           }
-
           const prevWord = cleanAligned[idx - 1];
           const timeGap = word.start_s - prevWord.end_s;
-          
           const currentLen = currentLine.reduce((sum, w) => sum + w.word.length + 1, 0);
-
           const isGapBig = timeGap > GAP_THRESHOLD;
           const isLineLong = currentLen > MAX_CHARS;
           const endsClause = /[.,;!?]$/.test(prevWord.word);
-
           if (isGapBig || ((isLineLong || endsClause) && timeGap > 0.15)) {
               groups.push(currentLine);
               currentLine = [word];
@@ -350,22 +317,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               currentLine.push(word);
           }
       });
-
       if (currentLine.length > 0) groups.push(currentLine);
       return groups;
   };
 
-  // Handle Image Source Logic (Cache busting for CORS)
+  // Handle Image Source Logic
   useEffect(() => {
     if (!clipData) return;
-
     let url = clipData.imageLargeUrl || clipData.imageUrl || `https://cdn2.suno.ai/image_large_${clipData.id}.jpeg`;
     if (url.includes('suno.ai') && !url.includes('?')) {
         url += `?t=${Date.now()}`;
     }
     setImgSrc(url);
-    
-    // Set Lyric Source from clip data if empty
     if (!lyricSource) {
         const raw = clipData.originalData?.lyricsAlone || clipData.metadata?.prompt || "";
         setLyricSource(raw);
@@ -376,7 +339,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       setImgSrc('https://placehold.co/1080x1080/1e293b/475569?text=No+Cover');
   };
 
-  // Load Clip Data when ID changes
+  // Load Clip Data
   useEffect(() => {
     if (!selectedClipId) return;
     setLines([]); 
@@ -384,13 +347,11 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     const fromHistory = history.find(c => c.id === selectedClipId);
     if (fromHistory) {
         setClipData(fromHistory);
-        // Reset Lyric Source for new song
         const rawLyrics = fromHistory.originalData?.lyricsAlone || fromHistory.metadata?.prompt || "";
         setLyricSource(rawLyrics);
 
         if (fromHistory.alignmentData) {
             setAlignment(fromHistory.alignmentData);
-            
             let autoLines;
             if (rawLyrics) {
                 autoLines = matchWordsToPrompt(fromHistory.alignmentData, rawLyrics);
@@ -398,7 +359,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 autoLines = groupWordsByTiming(fromHistory.alignmentData);
             }
             setLines(autoLines);
-
         } else if (sunoCookie && !fromHistory.id.startsWith('draft_')) {
              setIsPreparing(true);
              getLyricAlignment(fromHistory.id, sunoCookie)
@@ -406,7 +366,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                     if(res && res.aligned_words) {
                         setAlignment(res.aligned_words);
                         onUpdateClip(fromHistory.id, { alignmentData: res.aligned_words });
-                        
                         let autoLines;
                         if(rawLyrics) {
                              autoLines = matchWordsToPrompt(res.aligned_words, rawLyrics);
@@ -428,7 +387,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             imageUrl: `https://cdn2.suno.ai/image_large_${selectedClipId}.jpeg`,
             metadata: { tags: '', prompt: '' }
         });
-        setLyricSource(""); // Reset for manual ID
+        setLyricSource(""); 
         
         if (sunoCookie) {
              setIsPreparing(true);
@@ -459,40 +418,27 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
   const handleApplyLyrics = () => {
     if(!alignment) return;
-    // Use the current lyricSource as the authority
     const newLines = matchWordsToPrompt(alignment, lyricSource);
     setLines(newLines);
-    
-    // UI Feedback
     setApplyStatus('applied');
     setTimeout(() => setApplyStatus('idle'), 2000);
   };
 
   const handleSmartGroup = async () => {
       if (!clipData || !alignment) return;
-      
       const cleanLyrics = stripMetaTags(lyricSource);
-
       if (!cleanLyrics.trim()) {
           alert("No text lyrics found to group against.");
           return;
       }
-      
       setIsGrouping(true);
       try {
           const cleanAligned = getCleanAlignedWords(alignment);
-          
-          // 1. JS Heuristics
           const pseudoLines = matchWordsToPrompt(alignment, lyricSource);
           setLines(pseudoLines);
-
-          // 2. Gemini Refinement
           const grouped = await groupLyricsByLines(cleanLyrics, cleanAligned, apiKey, geminiModel, pseudoLines);
-          
           if (grouped && grouped.length > 0) {
               setLines(grouped);
-          } else {
-             console.warn("AI couldn't group the lines. Keeping prompt-based structure.");
           }
       } catch (e) {
           console.error(e);
@@ -529,13 +475,23 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       }
   };
 
-  /**
-   * Helper: Draw image/video covering the canvas (object-cover)
-   */
+  // Convert Hex to RGBA helper for inactive words
+  const hexToRgba = (hex: string, alpha: number) => {
+    let c: any;
+    if(/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)){
+        c= hex.substring(1).split('');
+        if(c.length== 3){
+            c= [c[0], c[0], c[1], c[1], c[2], c[2]];
+        }
+        c= '0x'+c.join('');
+        return 'rgba('+[(c>>16)&255, (c>>8)&255, c&255].join(',')+','+alpha+')';
+    }
+    return `rgba(255,255,255,${alpha})`;
+  }
+
   const drawCover = (ctx: CanvasRenderingContext2D, img: CanvasImageSource | HTMLVideoElement | HTMLImageElement, w: number, h: number) => {
         let imgW = 0;
         let imgH = 0;
-
         if (img instanceof HTMLVideoElement) {
             imgW = img.videoWidth;
             imgH = img.videoHeight;
@@ -543,28 +499,21 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             imgW = img.naturalWidth || img.width;
             imgH = img.naturalHeight || img.height;
         }
-
         if (!imgW || !imgH) return;
-
         const imgRatio = imgW / imgH;
         const winRatio = w / h;
-
         let drawW, drawH, startX, startY;
-
         if (imgRatio > winRatio) {
-            // Image is wider than canvas -> crop sides
             drawH = h;
             drawW = h * imgRatio;
             startX = (w - drawW) / 2;
             startY = 0;
         } else {
-            // Image is taller than canvas -> crop top/bottom
             drawW = w;
             drawH = w / imgRatio;
             startX = 0;
             startY = (h - drawH) / 2;
         }
-        
         ctx.drawImage(img, startX, startY, drawW, drawH);
   };
 
@@ -575,12 +524,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       ctx.fillRect(0, 0, width, height);
 
       let drawn = false;
-
-      // Try Custom Background first
       if (customBg) {
           if (customBg.type === 'video' && customVideoRef.current) {
-              // Note: During offline render, the loop logic sets current time manually.
-              // During preview, it just plays.
               drawCover(ctx, customVideoRef.current, width, height);
               drawn = true;
           } else if (customBg.type === 'image') {
@@ -591,8 +536,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               }
           }
       }
-
-      // Fallback to Default Suno Cover
       if (!drawn) {
         const bgImg = document.getElementById('source-img') as HTMLImageElement;
         if (bgImg && bgImg.complete) {
@@ -601,15 +544,15 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       }
 
       // Overlay Dimmer
-      ctx.fillStyle = 'rgba(0,0,0,0.7)'; // Slightly lighter dim than before
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
       ctx.fillRect(0, 0, width, height);
 
-      // 2. Draw Text
+      // 2. Draw Text (Smooth Scroll)
       if (lines.length > 0) {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           
-          // Improved Active Line Logic
+          // Determine Active Line
           let activeLineIdx = lines.findIndex(line => {
              if (line.length === 0) return false;
              const start = line[0].start_s;
@@ -617,42 +560,54 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
              return time >= start && time <= end;
           });
 
+          // Look ahead logic for silent gaps
           if (activeLineIdx === -1) {
               const upcomingIdx = lines.findIndex(line => line.length > 0 && line[0].start_s > time);
               if (upcomingIdx !== -1) {
                   const timeToStart = lines[upcomingIdx][0].start_s - time;
                   if (upcomingIdx === 0 && timeToStart > 4) {
-                       activeLineIdx = -1; 
+                       activeLineIdx = -1; // Wait at start
                   } else {
-                       activeLineIdx = upcomingIdx;
+                       activeLineIdx = upcomingIdx; // Pre-select next line
                   }
               } else {
-                  activeLineIdx = lines.length - 1;
+                  activeLineIdx = lines.length - 1; // End of song
               }
           }
           
-          if (activeLineIdx === -1) {
-               ctx.font = 'italic 24px Inter, sans-serif';
-               ctx.fillStyle = 'rgba(255,255,255,0.2)';
-               ctx.fillText("...", width / 2, height / 2);
+          // --- Smooth Scrolling Logic ---
+          // Interpolate the smoothIndex towards the target activeLineIdx
+          if (activeLineIdx !== -1) {
+              const diff = activeLineIdx - smoothLineIdxRef.current;
+              // Snap if jump is too large (seeking)
+              if (Math.abs(diff) > 4) {
+                  smoothLineIdxRef.current = activeLineIdx;
+              } else {
+                  // Apply smoothing factor
+                  smoothLineIdxRef.current += diff * smoothingFactor;
+              }
           }
 
-          // Measure Line Helper
-          const measureLine = (idx: number, scale: number) => {
+          // Render range: visible lines around the smooth index
+          const renderCenterIdx = smoothLineIdxRef.current;
+          const baseIdx = Math.floor(renderCenterIdx);
+          const PADDING = aspectRatio === "9:16" ? 60 : 40;
+          const centerY = height / 2;
+
+          // Helper to calculate line layout (cached per frame ideally, but lightweight enough)
+          const getLayout = (idx: number, scale: number) => {
               if (idx < 0 || idx >= lines.length) return null;
               const line = lines[idx];
-              // displayWords are already cleaned by getCleanAlignedWords logic upstream
-              const displayWords = line;
-              if (displayWords.length === 0) return null;
+              if (line.length === 0) return null;
 
               let fontSize = 48 * scale;
               if (aspectRatio === "9:16") fontSize = 36 * scale; 
               
-              ctx.font = `bold ${fontSize}px Inter, sans-serif`;
+              ctx.font = `bold ${fontSize}px ${fontFamily}`;
               const lineHeight = fontSize * 1.3;
               const maxW = width * 0.85;
 
-              const wordsWithWidths = displayWords.map(w => ({
+              const wordsWithWidths = line.map(w => ({
                   ...w,
                   width: ctx.measureText(w.word + " ").width
               }));
@@ -674,43 +629,110 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               if (currentRow.length > 0) {
                   rows.push({ words: currentRow, width: currentWidth });
               }
-              
-              const totalHeight = rows.length * lineHeight;
-              return { rows, totalHeight, lineHeight, fontSize };
+              return { rows, totalHeight: rows.length * lineHeight, lineHeight, fontSize };
           };
 
-          // Draw Line Helper
-          const drawLine = (layout: any, centerY: number, alpha: number, isActive: boolean) => {
-              if (!layout) return;
-              
-              ctx.font = `bold ${layout.fontSize}px Inter, sans-serif`;
-              
-              // startY is the top of the first line in the block
-              // We want the block centered at centerY
-              const startY = centerY - ((layout.rows.length - 1) * layout.lineHeight) / 2;
+          // We render lines [baseIdx - 2] to [baseIdx + 3]
+          // Calculate Y offsets dynamically based on heights
+          const visibleLines = [];
+          for (let i = baseIdx - 2; i <= baseIdx + 3; i++) {
+              if (i >= 0 && i < lines.length) {
+                  const dist = Math.abs(i - renderCenterIdx);
+                  // Dynamic scaling based on distance from smooth center
+                  const scale = Math.max(0.6, 1.2 - (dist * 0.3)); 
+                  const opacity = Math.max(0.1, 1 - (dist * 0.5));
+                  
+                  const layout = getLayout(i, scale);
+                  if (layout) {
+                      visibleLines.push({ index: i, layout, scale, opacity });
+                  }
+              }
+          }
 
-              layout.rows.forEach((row: any, rowIdx: number) => {
-                  const rowY = startY + (rowIdx * layout.lineHeight);
+          // Positioning Strategy:
+          // We want the point represented by `renderCenterIdx` to be at `centerY`.
+          // We assume "smoothLineIdx" corresponds to the CENTER of that line index.
+          // To calculate pixel offset, we sum heights relative to the center.
+          
+          // Calculate global Y offset needed to shift the "center" line to the middle
+          const fractional = renderCenterIdx - baseIdx;
+          
+          // Get height of the base line and next line to determine interpolation distance
+          const baseLayout = getLayout(baseIdx, 1.2); // approx max scale for measuring spacing
+          const nextLayout = getLayout(baseIdx + 1, 1.2);
+          
+          const baseH = baseLayout ? baseLayout.totalHeight : 60;
+          const nextH = nextLayout ? nextLayout.totalHeight : 60;
+          
+          // The scroll distance for 1.0 index change is roughly (Height/2 + Padding + NextHeight/2)
+          const scrollDist = (baseH / 2) + PADDING + (nextH / 2);
+          const pixelOffset = fractional * scrollDist;
+
+          // Draw visible lines
+          visibleLines.forEach(item => {
+              // Calculate relative position (index delta)
+              const relIndex = item.index - baseIdx; 
+              
+              // We estimate Y position by summing heights. 
+              // This is an approximation for visual smoothness.
+              // For a perfect scroll, we'd sum actual heights between base and item.index.
+              let yOffset = 0;
+              
+              if (relIndex === 0) {
+                  yOffset = 0;
+              } else if (relIndex > 0) {
+                  // Sum heights downwards
+                  let hSum = baseH / 2 + PADDING; // Start from bottom of base
+                  for (let k = baseIdx + 1; k < item.index; k++) {
+                       const l = getLayout(k, 1.0); // approx
+                       hSum += (l ? l.totalHeight : 60) + PADDING;
+                  }
+                  const l = getLayout(item.index, 1.0);
+                  hSum += (l ? l.totalHeight : 60) / 2;
+                  yOffset = hSum;
+              } else {
+                  // Sum heights upwards
+                  let hSum = baseH / 2 + PADDING; // Start from top of base
+                  for (let k = baseIdx - 1; k > item.index; k--) {
+                      const l = getLayout(k, 1.0);
+                      hSum += (l ? l.totalHeight : 60) + PADDING;
+                  }
+                  const l = getLayout(item.index, 1.0);
+                  hSum += (l ? l.totalHeight : 60) / 2;
+                  yOffset = -hSum;
+              }
+
+              // Final Y = ScreenCenter - PixelInterpolation + DiscreteOffset
+              const drawY = centerY - pixelOffset + yOffset;
+              
+              // Draw the line
+              ctx.font = `bold ${item.layout.fontSize}px ${fontFamily}`;
+              const startTextY = drawY - ((item.layout.rows.length - 1) * item.layout.lineHeight) / 2;
+
+              item.layout.rows.forEach((row: any, rowIdx: number) => {
+                  const rowY = startTextY + (rowIdx * item.layout.lineHeight);
                   let currentX = (width - row.width) / 2;
 
                   row.words.forEach((w: any) => {
                       const isWordActive = time >= w.start_s && time <= w.end_s;
                       const isWordPast = time > w.end_s;
+                      
+                      const isLineActive = item.index === activeLineIdx;
 
-                      if (isActive) {
+                      if (isLineActive) {
                          if (isWordActive) {
-                             ctx.fillStyle = '#e879f9'; 
-                             ctx.shadowColor = '#d946ef'; 
+                             ctx.fillStyle = activeColor;
+                             ctx.shadowColor = activeColor; 
                              ctx.shadowBlur = 25;
                          } else if (isWordPast) {
-                             ctx.fillStyle = '#f1f5f9'; 
+                             ctx.fillStyle = hexToRgba(inactiveColor, 0.9);
                              ctx.shadowBlur = 0;
                          } else {
-                             ctx.fillStyle = 'rgba(255,255,255,0.3)'; 
+                             ctx.fillStyle = hexToRgba(inactiveColor, inactiveOpacity);
                              ctx.shadowBlur = 0;
                          }
                       } else {
-                          ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+                          ctx.fillStyle = hexToRgba(inactiveColor, item.opacity * inactiveOpacity);
                           ctx.shadowBlur = 0;
                       }
 
@@ -720,81 +742,59 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                   });
               });
               ctx.shadowBlur = 0;
-          };
-
-          // Calculate Layouts
-          const activeLayout = measureLine(activeLineIdx, 1.2);
-          const prev1Layout = measureLine(activeLineIdx - 1, 0.8);
-          const prev2Layout = measureLine(activeLineIdx - 2, 0.6);
-          const next1Layout = measureLine(activeLineIdx + 1, 0.8);
-          const next2Layout = measureLine(activeLineIdx + 2, 0.6);
-
-          const PADDING = aspectRatio === "9:16" ? 40 : 25;
-          const centerY = height / 2;
-
-          // Draw Active
-          if (activeLayout) drawLine(activeLayout, centerY, 1, true);
-
-          // Draw Previous Lines (Stacked Upwards)
-          if (prev1Layout) {
-              const activeH = activeLayout ? activeLayout.totalHeight : 0;
-              // Center of Prev1 = (Top of Active - Padding) - Half of Prev1
-              const prev1Y = centerY - (activeH / 2) - PADDING - (prev1Layout.totalHeight / 2);
-              drawLine(prev1Layout, prev1Y, 0.5, false);
-
-              if (prev2Layout) {
-                  const prev2Y = prev1Y - (prev1Layout.totalHeight / 2) - PADDING - (prev2Layout.totalHeight / 2);
-                  drawLine(prev2Layout, prev2Y, 0.2, false);
-              }
-          }
-
-          // Draw Next Lines (Stacked Downwards)
-          if (next1Layout) {
-               const activeH = activeLayout ? activeLayout.totalHeight : 0;
-               // Center of Next1 = (Bottom of Active + Padding) + Half of Next1
-               const next1Y = centerY + (activeH / 2) + PADDING + (next1Layout.totalHeight / 2);
-               drawLine(next1Layout, next1Y, 0.5, false);
-
-               if (next2Layout) {
-                   const next2Y = next1Y + (next1Layout.totalHeight / 2) + PADDING + (next2Layout.totalHeight / 2);
-                   drawLine(next2Layout, next2Y, 0.2, false);
-               }
-          }
+          });
 
       } else if (alignment) {
-          // Fallback if no grouping
+          // Fallback if no grouping (Raw word stream)
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           const cleanAligned = getCleanAlignedWords(alignment);
-
+          // Just center the current word
           const activeIndex = cleanAligned.findIndex(w => time >= w.start_s && time <= w.end_s);
           const upcomingIndex = cleanAligned.findIndex(w => w.start_s > time);
           
           let baseIndex = activeIndex !== -1 ? activeIndex : (upcomingIndex !== -1 ? upcomingIndex : cleanAligned.length - 1);
           if (baseIndex < 0) baseIndex = 0;
 
-          const startWindow = Math.max(0, baseIndex - 1);
-          const endWindow = Math.min(cleanAligned.length, baseIndex + 3);
-          const wordsToShow = cleanAligned.slice(startWindow, endWindow);
-          const startY = (height / 2) + 50;
-          const lineHeight = 60;
+          // Simple smooth scroll for raw words?
+          const diff = baseIndex - smoothLineIdxRef.current;
+          if (Math.abs(diff) > 5) smoothLineIdxRef.current = baseIndex;
+          else smoothLineIdxRef.current += diff * smoothingFactor;
 
-          wordsToShow.forEach((wordObj, i) => {
-               const absoluteIndex = startWindow + i;
-               const isCurrent = absoluteIndex === activeIndex;
-               ctx.font = isCurrent ? 'bold 56px Inter, sans-serif' : '500 42px Inter, sans-serif';
-               ctx.fillStyle = isCurrent ? '#e879f9' : '#475569'; 
-               ctx.shadowColor = isCurrent ? '#d946ef' : 'transparent';
-               ctx.shadowBlur = isCurrent ? 20 : 0;
-               
-               ctx.fillText(wordObj.word, width / 2, startY + (i * lineHeight) - (isCurrent ? 10 : 0));
-          });
-          ctx.shadowBlur = 0;
+          const renderIdx = smoothLineIdxRef.current;
+          const startWindow = Math.floor(renderIdx) - 2;
+          const endWindow = Math.floor(renderIdx) + 3;
+          
+          const lineHeight = 70;
+          const centerY = height / 2;
+          const pixelOffset = (renderIdx - Math.floor(renderIdx)) * lineHeight;
+
+          for (let i = startWindow; i <= endWindow; i++) {
+               if(i >= 0 && i < cleanAligned.length) {
+                   const wordObj = cleanAligned[i];
+                   const relIdx = i - Math.floor(renderIdx);
+                   const drawY = centerY - pixelOffset + (relIdx * lineHeight);
+                   
+                   const dist = Math.abs(i - renderIdx);
+                   const isCurrent = i === activeIndex;
+                   const opacity = Math.max(0.2, 1 - dist * 0.4);
+                   const scale = Math.max(0.5, 1 - dist * 0.2);
+                   
+                   ctx.font = `bold ${56 * scale}px ${fontFamily}`;
+                   ctx.fillStyle = isCurrent ? activeColor : hexToRgba(inactiveColor, opacity);
+                   if (isCurrent) {
+                       ctx.shadowColor = activeColor;
+                       ctx.shadowBlur = 20;
+                   }
+                   ctx.fillText(wordObj.word, width / 2, drawY);
+                   ctx.shadowBlur = 0;
+               }
+          }
       }
 
       // Title & Progress Bar
       ctx.textAlign = 'center';
-      ctx.font = 'bold 24px Inter, sans-serif';
+      ctx.font = `bold 24px ${fontFamily}`;
       ctx.fillStyle = '#ffffff';
       
       const titleY = aspectRatio === "9:16" ? 120 : 60;
@@ -804,7 +804,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
       if (clipData && audioRef.current && audioRef.current.duration) {
           const pct = time / audioRef.current.duration;
-          ctx.fillStyle = '#a855f7';
+          ctx.fillStyle = activeColor;
           ctx.fillRect(0, height - 8, width * pct, 8);
       }
   };
@@ -835,7 +835,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       return () => {
           if (requestRef.current) cancelAnimationFrame(requestRef.current);
       };
-  }, [selectedClipId, alignment, lines, isRendering, aspectRatio, customBg]);
+  }, [selectedClipId, alignment, lines, isRendering, aspectRatio, customBg, activeColor, inactiveColor, fontFamily, smoothingFactor, inactiveOpacity]);
 
   // --- OFFLINE RENDERING LOGIC ---
   const startOfflineRender = async () => {
@@ -1348,6 +1348,79 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                          )}
                      </div>
                      
+                     {/* Visual Settings Panel */}
+                     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                         <div className="flex items-center justify-between mb-3">
+                             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Visual Settings</h3>
+                             <button onClick={() => {
+                                 setActiveColor('#e879f9');
+                                 setInactiveColor('#ffffff');
+                                 setInactiveOpacity(0.3);
+                                 setFontFamily('Inter, sans-serif');
+                                 setSmoothingFactor(0.1);
+                             }} className="text-xs text-purple-400 hover:text-purple-300">Reset to Default</button>
+                         </div>
+                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                             {/* Font */}
+                             <div className="col-span-2 md:col-span-1">
+                                 <label className="text-[10px] text-slate-500 block mb-1">Font Family</label>
+                                 <select 
+                                    value={fontFamily} 
+                                    onChange={(e) => setFontFamily(e.target.value)}
+                                    className="w-full bg-slate-800 border border-slate-700 rounded p-1.5 text-xs text-slate-200"
+                                 >
+                                     {FONTS.map(f => (
+                                         <option key={f.value} value={f.value}>{f.label}</option>
+                                     ))}
+                                 </select>
+                             </div>
+
+                             {/* Colors */}
+                             <div>
+                                 <label className="text-[10px] text-slate-500 block mb-1">Active Color</label>
+                                 <div className="flex items-center gap-2">
+                                     <input 
+                                        type="color" 
+                                        value={activeColor}
+                                        onChange={(e) => setActiveColor(e.target.value)}
+                                        className="w-8 h-8 rounded cursor-pointer bg-transparent border-none p-0" 
+                                     />
+                                     <span className="text-xs font-mono text-slate-400">{activeColor}</span>
+                                 </div>
+                             </div>
+                             <div>
+                                 <label className="text-[10px] text-slate-500 block mb-1">Inactive Color</label>
+                                 <div className="flex items-center gap-2">
+                                     <input 
+                                        type="color" 
+                                        value={inactiveColor}
+                                        onChange={(e) => setInactiveColor(e.target.value)}
+                                        className="w-8 h-8 rounded cursor-pointer bg-transparent border-none p-0" 
+                                     />
+                                     <span className="text-xs font-mono text-slate-400">{inactiveColor}</span>
+                                 </div>
+                             </div>
+
+                             {/* Motion */}
+                             <div className="col-span-2 md:col-span-1">
+                                 <label className="text-[10px] text-slate-500 block mb-1">Scroll Smoothing</label>
+                                 <input 
+                                    type="range" 
+                                    min="0.01" 
+                                    max="0.5" 
+                                    step="0.01" 
+                                    value={smoothingFactor} 
+                                    onChange={(e) => setSmoothingFactor(parseFloat(e.target.value))}
+                                    className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                 />
+                                 <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+                                     <span>Smooth</span>
+                                     <span>Instant</span>
+                                 </div>
+                             </div>
+                         </div>
+                     </div>
+
                      {/* Player Controls */}
                      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
                          {/* Scrubber */}
