@@ -411,7 +411,15 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     const file = e.target.files?.[0];
     if (file) {
         const url = URL.createObjectURL(file);
-        const type = file.type.startsWith('video') ? 'video' : 'image';
+        // Robust video detection: Trust extension if MIME is vague, or MIME if explicit
+        let type: 'video' | 'image' = 'image';
+        
+        if (file.type.startsWith('video')) {
+            type = 'video';
+        } else if (file.name.match(/\.(mp4|webm|mov|mkv)$/i)) {
+            type = 'video';
+        }
+        
         setCustomBg({ url, type, name: file.name });
     }
   };
@@ -958,18 +966,22 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             if (customBg?.type === 'video' && customVideoRef.current) {
                 const vid = customVideoRef.current;
                 const loopTime = t % vid.duration;
-                // Only seek if difference is significant to avoid stutter or redundant seeks
-                if (Math.abs(vid.currentTime - loopTime) > 0.1) {
+                // Since the video is paused during render, we must manually set currentTime 
+                // every frame to step through it.
+                // We compare to ensure we don't set it redundantly if timestamps match closely,
+                // BUT for paused video, setting it forces the frame update.
+                // We use a small epsilon to avoid jitter but ensure it updates.
+                if (Math.abs(vid.currentTime - loopTime) > 0.001) {
                     vid.currentTime = loopTime;
-                    // Wait for seek to complete to ensure frame is available
                     await new Promise<void>(resolve => {
                          const onSeek = () => {
                              vid.removeEventListener('seeked', onSeek);
                              resolve();
                          };
                          vid.addEventListener('seeked', onSeek);
-                         // Fallback if event doesn't fire immediately (unlikely in robust browser envs but good safety)
-                         // setTimeout(onSeek, 50); 
+                         // Fallback just in case browser doesn't fire seeked quickly
+                         // (e.g. if we are close to same frame)
+                         // But we depend on seeked to ensure drawImage gets the new frame.
                     });
                 }
             }
