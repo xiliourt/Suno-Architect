@@ -662,19 +662,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           }
 
           // Positioning Strategy:
-          // We want the point represented by `renderCenterIdx` to be at `centerY`.
-          // We assume "smoothLineIdx" corresponds to the CENTER of that line index.
-          // To calculate pixel offset, we sum heights relative to the center.
+          // We calculate pixel offsets using a CONSTANT REFERENCE SCALE (1.0)
+          // This ensures that as lines grow/shrink, the slot positions don't jump around.
+          // Only the text *inside* the slot grows/shrinks.
           
-          // Calculate global Y offset needed to shift the "center" line to the middle
           const fractional = renderCenterIdx - baseIdx;
           
-          // Get height of the base line and next line to determine interpolation distance
-          const baseLayout = getLayout(baseIdx, 1.2); // approx max scale for measuring spacing
-          const nextLayout = getLayout(baseIdx + 1, 1.2);
+          // Use Scale 1.0 for layout metrics to keep spacing consistent
+          const baseLayoutRef = getLayout(baseIdx, 1.0); 
+          const nextLayoutRef = getLayout(baseIdx + 1, 1.0);
           
-          const baseH = baseLayout ? baseLayout.totalHeight : 60;
-          const nextH = nextLayout ? nextLayout.totalHeight : 60;
+          const baseH = baseLayoutRef ? baseLayoutRef.totalHeight : 60;
+          const nextH = nextLayoutRef ? nextLayoutRef.totalHeight : 60;
           
           // The scroll distance for 1.0 index change is roughly (Height/2 + Padding + NextHeight/2)
           const scrollDist = (baseH / 2) + PADDING + (nextH / 2);
@@ -685,18 +684,16 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               // Calculate relative position (index delta)
               const relIndex = item.index - baseIdx; 
               
-              // We estimate Y position by summing heights. 
-              // This is an approximation for visual smoothness.
-              // For a perfect scroll, we'd sum actual heights between base and item.index.
+              // Estimate Y position by summing heights using REFERENCE SCALE (1.0)
               let yOffset = 0;
               
               if (relIndex === 0) {
                   yOffset = 0;
               } else if (relIndex > 0) {
                   // Sum heights downwards
-                  let hSum = baseH / 2 + PADDING; // Start from bottom of base
+                  let hSum = baseH / 2 + PADDING; 
                   for (let k = baseIdx + 1; k < item.index; k++) {
-                       const l = getLayout(k, 1.0); // approx
+                       const l = getLayout(k, 1.0);
                        hSum += (l ? l.totalHeight : 60) + PADDING;
                   }
                   const l = getLayout(item.index, 1.0);
@@ -704,7 +701,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                   yOffset = hSum;
               } else {
                   // Sum heights upwards
-                  let hSum = baseH / 2 + PADDING; // Start from top of base
+                  let hSum = baseH / 2 + PADDING;
                   for (let k = baseIdx - 1; k > item.index; k--) {
                       const l = getLayout(k, 1.0);
                       hSum += (l ? l.totalHeight : 60) + PADDING;
@@ -1179,7 +1176,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                         title="Remove Custom BG"
                                       >
                                           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
-                                            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                                            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
                                           </svg>
                                       </button>
                                  </div>
