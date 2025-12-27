@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SunoClip, AlignedWord } from '../types';
 import CopyButton from './CopyButton';
 import { getLyricAlignment, updateSunoMetadata } from '../services/sunoApi';
+import { matchWordsToPrompt, stripMetaTags } from '../services/geminiService';
 
 interface HistorySectionProps {
   history: SunoClip[];
@@ -14,10 +15,21 @@ interface HistorySectionProps {
 const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, sunoCookie, onResync, isSyncing }) => {
   const [selectedClip, setSelectedClip] = useState<SunoClip | null>(null);
   const [manualIdInput, setManualIdInput] = useState('');
+  const [editedLyrics, setEditedLyrics] = useState('');
   
   // Loading States
   const [loadingAlignment, setLoadingAlignment] = useState(false);
   const [alignmentError, setAlignmentError] = useState<string | null>(null);
+
+  // Initialize edited lyrics when clip opens
+  useEffect(() => {
+      if (selectedClip) {
+          const orig = selectedClip.originalData;
+          // Fallback chain for source text
+          const text = orig?.lyricsAlone || orig?.lyricsWithTags || selectedClip.metadata?.prompt || "";
+          setEditedLyrics(text);
+      }
+  }, [selectedClip?.id]);
 
   const handleDownloadImage = async (e: React.MouseEvent, url: string, filename: string) => {
     e.preventDefault();
@@ -78,6 +90,25 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
     setManualIdInput('');
   };
 
+  const handleSaveLyrics = () => {
+      if (!selectedClip) return;
+      const clean = stripMetaTags(editedLyrics);
+      
+      const baseOriginal = selectedClip.originalData || {
+         style: '', title: '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 0, styleInfluence: 0, lyricsWithTags: '', lyricsAlone: '', javascriptCode: '', fullResponse: ''
+      };
+
+      const updates: Partial<SunoClip> = {
+          originalData: {
+              ...baseOriginal,
+              lyricsAlone: clean
+          }
+      };
+      
+      onUpdateClip(selectedClip.id, updates);
+      setSelectedClip(prev => prev ? ({ ...prev, ...updates }) : null);
+  };
+
   const handleGetAlignment = async () => {
       if (!selectedClip || !sunoCookie || isDraft(selectedClip)) return;
       
@@ -114,14 +145,42 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
       return `[${minutes}:${secs}.${hundredths}]`;
   };
 
-  // Function to convert aligned words to LRC format
-  const convertToLRC = (alignedWords: AlignedWord[]) => {
+  const handleGenerateLRC = () => {
+      if (!selectedClip?.alignmentData) return;
+      
+      // Use edited lyrics from state for structure
+      const sourceText = editedLyrics;
+      
+      // Use the shared matcher logic to group words by lines
+      const lines = matchWordsToPrompt(selectedClip.alignmentData, sourceText);
+      
+      if (!lines || lines.length === 0) return;
+
       let lrcContent = '';
-      alignedWords.forEach(wordObj => {
-          const time = formatLrcTime(wordObj.start_s);
-          lrcContent += `${time}${wordObj.word}\n`;
+      lines.forEach(line => {
+          if (line.length === 0) return;
+          const time = formatLrcTime(line[0].start_s);
+          const lineText = line.map(w => w.word).join(' ');
+          lrcContent += `${time}${lineText}\n`;
       });
-      return lrcContent;
+
+      const updates: Partial<SunoClip> = { lrcContent };
+
+      // Save the edited lyrics used for generation
+      const clean = stripMetaTags(sourceText);
+      const baseOriginal = selectedClip.originalData || {
+            style: '', title: '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 0, styleInfluence: 0, lyricsWithTags: '', lyricsAlone: '', javascriptCode: '', fullResponse: ''
+      };
+        
+      updates.originalData = {
+            ...baseOriginal,
+            lyricsAlone: clean
+      };
+      
+      // Persist
+      onUpdateClip(selectedClip.id, updates);
+      // Update local
+      setSelectedClip(prev => prev ? ({ ...prev, ...updates }) : null);
   };
 
   // --- SRT Logic ---
@@ -137,38 +196,42 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
       return `${hours}:${minutes}:${secs},${milliseconds}`;
   };
 
-  // Function to convert aligned words to SRT format
-  const convertToSRT = (alignedWords: AlignedWord[]) => {
-      let srtContent = '';
-      alignedWords.forEach((wordObj, index) => {
-          const startTime = formatSrtTime(wordObj.start_s);
-          const endTime = formatSrtTime(wordObj.end_s);
-          srtContent += `${index + 1}\n`;
-          srtContent += `${startTime} --> ${endTime}\n`;
-          srtContent += `${wordObj.word}\n\n`;
-      });
-      return srtContent;
-  };
-
-
-  const handleGenerateLRC = () => {
-      if (!selectedClip?.alignmentData) return;
-      const lrc = convertToLRC(selectedClip.alignmentData);
-      
-      // Persist
-      onUpdateClip(selectedClip.id, { lrcContent: lrc });
-      // Update local
-      setSelectedClip(prev => prev ? ({ ...prev, lrcContent: lrc }) : null);
-  };
-
   const handleGenerateSRT = () => {
       if (!selectedClip?.alignmentData) return;
-      const srt = convertToSRT(selectedClip.alignmentData);
       
+      const sourceText = editedLyrics;
+      const lines = matchWordsToPrompt(selectedClip.alignmentData, sourceText);
+
+      if (!lines || lines.length === 0) return;
+
+      let srtContent = '';
+      lines.forEach((line, index) => {
+          if (line.length === 0) return;
+          const startTime = formatSrtTime(line[0].start_s);
+          const endTime = formatSrtTime(line[line.length - 1].end_s);
+          const lineText = line.map(w => w.word).join(' ');
+          
+          srtContent += `${index + 1}\n`;
+          srtContent += `${startTime} --> ${endTime}\n`;
+          srtContent += `${lineText}\n\n`;
+      });
+      
+      const updates: Partial<SunoClip> = { srtContent };
+      
+      // Save edited lyrics
+      const clean = stripMetaTags(sourceText);
+      const baseOriginal = selectedClip.originalData || {
+            style: '', title: '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 0, styleInfluence: 0, lyricsWithTags: '', lyricsAlone: '', javascriptCode: '', fullResponse: ''
+      };
+      updates.originalData = {
+            ...baseOriginal,
+            lyricsAlone: clean
+      };
+
       // Persist
-      onUpdateClip(selectedClip.id, { srtContent: srt });
+      onUpdateClip(selectedClip.id, updates);
       // Update local
-      setSelectedClip(prev => prev ? ({ ...prev, srtContent: srt }) : null);
+      setSelectedClip(prev => prev ? ({ ...prev, ...updates }) : null);
   };
 
   const formatDisplayTime = (seconds: number) => {
@@ -477,6 +540,18 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
                                                             <line x1="12" y1="15" x2="12" y2="3" />
                                                         </svg>
                                                     </button>
+                                                    <button
+                                                        onClick={handleGenerateLRC}
+                                                        className="px-2 py-1 bg-purple-800 hover:bg-purple-700 text-purple-200 text-xs font-medium rounded-lg border border-purple-600/30"
+                                                        title="Redo LRC with current lyrics"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                                                            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                                                            <path d="M3 3v5h5" />
+                                                            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                                                            <path d="M16 16h5v5" />
+                                                        </svg>
+                                                    </button>
                                                 </div>
                                              )}
 
@@ -500,6 +575,18 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
                                                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                                                             <polyline points="7 10 12 15 17 10" />
                                                             <line x1="12" y1="15" x2="12" y2="3" />
+                                                        </svg>
+                                                    </button>
+                                                    <button
+                                                        onClick={handleGenerateSRT}
+                                                        className="px-2 py-1 bg-blue-800 hover:bg-blue-700 text-blue-200 text-xs font-medium rounded-lg border border-blue-600/30"
+                                                        title="Redo SRT with current lyrics"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                                                            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                                                            <path d="M3 3v5h5" />
+                                                            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                                                            <path d="M16 16h5v5" />
                                                         </svg>
                                                     </button>
                                                 </div>
@@ -552,19 +639,30 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
                     )}
 
                      {/* Clean Lyrics / Raw Prompt - Always show */}
-                     {clipData.cleanLyrics && (
-                         <div className="space-y-2">
-                             <div className="flex justify-between items-center">
-                                <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                                    {clipData.isRich ? "Clean Lyrics" : "Lyrics / Prompt"}
-                                </h3>
-                                <CopyButton text={clipData.cleanLyrics} label="Copy" />
-                             </div>
-                             <div className="p-4 bg-slate-900 border border-slate-800 rounded-lg max-h-[200px] overflow-y-auto custom-scrollbar">
-                                <pre className="text-sm text-slate-400 font-mono whitespace-pre-wrap leading-relaxed">{clipData.cleanLyrics}</pre>
-                             </div>
-                        </div>
-                    )}
+                     <div className="space-y-2">
+                         <div className="flex justify-between items-center">
+                            <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                                {clipData.isRich ? "Clean Lyrics (Editable)" : "Lyrics / Prompt (Editable)"}
+                            </h3>
+                            <div className="flex gap-2">
+                                <button 
+                                    onClick={handleSaveLyrics}
+                                    className="text-xs text-emerald-400 hover:text-emerald-300 px-2 py-1 hover:bg-emerald-900/30 rounded transition-colors border border-transparent hover:border-emerald-800"
+                                >
+                                    Save Edits
+                                </button>
+                                <CopyButton text={editedLyrics} label="Copy" />
+                            </div>
+                         </div>
+                         <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
+                            <textarea 
+                                value={editedLyrics}
+                                onChange={(e) => setEditedLyrics(e.target.value)}
+                                className="w-full h-[200px] bg-slate-900 p-4 text-sm text-slate-400 font-mono resize-none focus:outline-none focus:bg-slate-800/50 transition-colors custom-scrollbar leading-relaxed"
+                                placeholder="Edit lyrics structure here to improve synchronization..."
+                            />
+                         </div>
+                    </div>
 
                     {/* ID Linking Section */}
                     <div className="pt-4 border-t border-slate-800">
