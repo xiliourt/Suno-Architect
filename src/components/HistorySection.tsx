@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { SunoClip, AlignedWord } from '../types';
 import CopyButton from './CopyButton';
 import { getLyricAlignment, updateSunoMetadata } from '../services/sunoApi';
+import { matchWordsToPrompt, stripMetaTags } from '../services/geminiService';
 
 interface HistorySectionProps {
   history: SunoClip[];
@@ -114,14 +115,46 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
       return `[${minutes}:${secs}.${hundredths}]`;
   };
 
-  // Function to convert aligned words to LRC format
-  const convertToLRC = (alignedWords: AlignedWord[]) => {
+  const handleGenerateLRC = () => {
+      if (!selectedClip?.alignmentData) return;
+      
+      // Determine source text (Prompt or existing clean lyrics)
+      const sourceText = selectedClip.metadata?.prompt || selectedClip.originalData?.lyricsWithTags || selectedClip.originalData?.lyricsAlone || "";
+      
+      // Use the shared matcher logic to group words by lines
+      const lines = matchWordsToPrompt(selectedClip.alignmentData, sourceText);
+      
+      if (!lines || lines.length === 0) return;
+
       let lrcContent = '';
-      alignedWords.forEach(wordObj => {
-          const time = formatLrcTime(wordObj.start_s);
-          lrcContent += `${time}${wordObj.word}\n`;
+      lines.forEach(line => {
+          if (line.length === 0) return;
+          const time = formatLrcTime(line[0].start_s);
+          const lineText = line.map(w => w.word).join(' ');
+          lrcContent += `${time}${lineText}\n`;
       });
-      return lrcContent;
+
+      const updates: Partial<SunoClip> = { lrcContent };
+
+      // Update clean lyrics if we used a prompt to structure it
+      if (sourceText) {
+          const clean = stripMetaTags(sourceText);
+          if (clean) {
+             const baseOriginal = selectedClip.originalData || {
+                 style: '', title: '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 0, styleInfluence: 0, lyricsWithTags: '', lyricsAlone: '', javascriptCode: '', fullResponse: ''
+             };
+             
+             updates.originalData = {
+                 ...baseOriginal,
+                 lyricsAlone: clean
+             };
+          }
+      }
+      
+      // Persist
+      onUpdateClip(selectedClip.id, updates);
+      // Update local
+      setSelectedClip(prev => prev ? ({ ...prev, ...updates }) : null);
   };
 
   // --- SRT Logic ---
@@ -137,38 +170,46 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
       return `${hours}:${minutes}:${secs},${milliseconds}`;
   };
 
-  // Function to convert aligned words to SRT format
-  const convertToSRT = (alignedWords: AlignedWord[]) => {
-      let srtContent = '';
-      alignedWords.forEach((wordObj, index) => {
-          const startTime = formatSrtTime(wordObj.start_s);
-          const endTime = formatSrtTime(wordObj.end_s);
-          srtContent += `${index + 1}\n`;
-          srtContent += `${startTime} --> ${endTime}\n`;
-          srtContent += `${wordObj.word}\n\n`;
-      });
-      return srtContent;
-  };
-
-
-  const handleGenerateLRC = () => {
-      if (!selectedClip?.alignmentData) return;
-      const lrc = convertToLRC(selectedClip.alignmentData);
-      
-      // Persist
-      onUpdateClip(selectedClip.id, { lrcContent: lrc });
-      // Update local
-      setSelectedClip(prev => prev ? ({ ...prev, lrcContent: lrc }) : null);
-  };
-
   const handleGenerateSRT = () => {
       if (!selectedClip?.alignmentData) return;
-      const srt = convertToSRT(selectedClip.alignmentData);
       
+      const sourceText = selectedClip.metadata?.prompt || selectedClip.originalData?.lyricsWithTags || selectedClip.originalData?.lyricsAlone || "";
+      const lines = matchWordsToPrompt(selectedClip.alignmentData, sourceText);
+
+      if (!lines || lines.length === 0) return;
+
+      let srtContent = '';
+      lines.forEach((line, index) => {
+          if (line.length === 0) return;
+          const startTime = formatSrtTime(line[0].start_s);
+          const endTime = formatSrtTime(line[line.length - 1].end_s);
+          const lineText = line.map(w => w.word).join(' ');
+          
+          srtContent += `${index + 1}\n`;
+          srtContent += `${startTime} --> ${endTime}\n`;
+          srtContent += `${lineText}\n\n`;
+      });
+      
+      const updates: Partial<SunoClip> = { srtContent };
+      
+      // Update clean lyrics if we used a prompt
+      if (sourceText) {
+          const clean = stripMetaTags(sourceText);
+          if (clean) {
+             const baseOriginal = selectedClip.originalData || {
+                 style: '', title: '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 0, styleInfluence: 0, lyricsWithTags: '', lyricsAlone: '', javascriptCode: '', fullResponse: ''
+             };
+             updates.originalData = {
+                 ...baseOriginal,
+                 lyricsAlone: clean
+             };
+          }
+      }
+
       // Persist
-      onUpdateClip(selectedClip.id, { srtContent: srt });
+      onUpdateClip(selectedClip.id, updates);
       // Update local
-      setSelectedClip(prev => prev ? ({ ...prev, srtContent: srt }) : null);
+      setSelectedClip(prev => prev ? ({ ...prev, ...updates }) : null);
   };
 
   const formatDisplayTime = (seconds: number) => {
