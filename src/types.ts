@@ -68,3 +68,11 @@ export interface PromptSettings {
   library: SunoLibrary;
   constraints: LyricalConstraints;
 }
+
+export interface FileContext {
+  mimeType: string;
+  data: string; // Base64 data URL
+  name: string;
+}
+
+export type ViewMode = 'generator' | 'history' | 'visualizer';

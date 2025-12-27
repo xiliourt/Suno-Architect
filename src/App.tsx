@@ -3,7 +3,7 @@ import InputSection from './components/InputSection';
 import OutputSection from './components/OutputSection';
 import { Header } from './components/Header';
 import { generateSunoPrompt } from './services/geminiService';
-import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings, ViewMode } from './types';
+import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings, ViewMode, FileContext } from './types';
 import { DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS, buildKnowledgeBase, GET_PROMPT_V1 } from './constants';
 import Footer from './components/Footer';
 import SunoSettingsModal from './components/SunoSettingsModal';
@@ -335,11 +335,18 @@ const App: React.FC = () => {
     }
   };
 
-  const handleGenerate = async (prompt: string) => {
+  const handleGenerate = async (prompt: string, file?: FileContext) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null, result: null }));
     try {
-      // Pass the customized system prompt and gemini model
-      const result = await generateSunoPrompt(prompt, customApiKey, promptSettings.customSystemPrompt, geminiModel);
+      // Pass the customized system prompt, gemini model, and optional file
+      const result = await generateSunoPrompt(
+          prompt, 
+          customApiKey, 
+          promptSettings.customSystemPrompt, 
+          geminiModel, 
+          file
+      );
+      
       setState({ isLoading: false, error: null, result });
       
       // Auto-save to history as draft

@@ -1,12 +1,13 @@
 import { GoogleGenAI } from "@google/genai";
-import { ParsedSunoOutput, AlignedWord } from "../types";
+import { ParsedSunoOutput, AlignedWord, FileContext } from "../types";
 import { STRICT_OUTPUT_SUFFIX } from "../constants";
 
 export const generateSunoPrompt = async (
   userInput: string, 
   customApiKey?: string,
   systemInstruction?: string,
-  geminiModel: string = "gemini-3-flash-preview"
+  geminiModel: string = "gemini-3-flash-preview",
+  contextFile?: FileContext
 ): Promise<ParsedSunoOutput> => {
   const apiKey = customApiKey || process.env.API_KEY;
 
@@ -24,9 +25,36 @@ export const generateSunoPrompt = async (
   const finalSystemInstruction = `${systemInstruction}\n\n${STRICT_OUTPUT_SUFFIX}`;
 
   try {
+    const parts: any[] = [];
+    
+    // Add file context if present
+    if (contextFile) {
+        // Strip data URL prefix if present to get pure base64
+        const base64Data = contextFile.data.includes(',') 
+            ? contextFile.data.split(',')[1] 
+            : contextFile.data;
+            
+        parts.push({
+            inlineData: {
+                mimeType: contextFile.mimeType,
+                data: base64Data
+            }
+        });
+        
+        // Add a small hint about the file
+        parts.push({ text: `[Context File Provided: ${contextFile.name}]` });
+    }
+
+    // Add user text prompt (even if empty string, though UI prevents that usually)
+    if (userInput) {
+        parts.push({ text: userInput });
+    } else if (contextFile) {
+        parts.push({ text: "Create a song based on this file context." });
+    }
+
     const response = await ai.models.generateContent({
       model: geminiModel,
-      contents: userInput,
+      contents: { parts },
       config: {
         systemInstruction: finalSystemInstruction,
         temperature: 0.8,

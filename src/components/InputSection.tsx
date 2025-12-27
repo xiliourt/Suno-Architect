@@ -1,22 +1,49 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { FileContext } from '../types';
 
 interface InputSectionProps {
-  onGenerate: (prompt: string) => void;
+  onGenerate: (prompt: string, file?: FileContext) => void;
   isLoading: boolean;
   apiKeyValid: boolean;
 }
 
 const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiKeyValid }) => {
   const [prompt, setPrompt] = useState('');
+  const [selectedFile, setSelectedFile] = useState<FileContext | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (prompt.trim() && apiKeyValid) {
-      onGenerate(prompt);
+    if ((prompt.trim() || selectedFile) && apiKeyValid) {
+      onGenerate(prompt, selectedFile || undefined);
     }
   };
 
-  const isButtonDisabled = isLoading || !prompt.trim() || !apiKeyValid;
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setSelectedFile({
+            name: file.name,
+            mimeType: file.type,
+            data: event.target.result as string
+          });
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const clearFile = () => {
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const isButtonDisabled = isLoading || (!prompt.trim() && !selectedFile) || !apiKeyValid;
 
   return (
     <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-2xl p-6 shadow-xl relative">
@@ -33,9 +60,58 @@ const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiK
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             disabled={isLoading}
-            placeholder="E.g., An epic power ballad about a space explorer lost in the void, feeling hopeful yet lonely. Influences of 80s synthwave."
-            className="w-full h-40 bg-slate-900 border border-slate-700 rounded-xl p-4 text-slate-200 placeholder-slate-600 focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all resize-none text-base"
+            placeholder="E.g., An epic power ballad about a space explorer lost in the void. Or upload an image for inspiration."
+            className="w-full h-32 bg-slate-900 border border-slate-700 rounded-xl p-4 text-slate-200 placeholder-slate-600 focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all resize-none text-base"
           />
+        </div>
+
+        {/* File Upload Context Area */}
+        <div>
+           <input 
+              type="file" 
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept="image/*,text/plain,application/pdf"
+              className="hidden"
+           />
+           
+           {!selectedFile ? (
+               <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading}
+                  className="flex items-center gap-2 text-sm text-slate-400 hover:text-purple-400 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800/50 border border-transparent hover:border-slate-700"
+               >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                  </svg>
+                  <span>Add Context (Image, Text, PDF)</span>
+               </button>
+           ) : (
+               <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg p-2 max-w-max animate-in fade-in slide-in-from-left-2">
+                   <div className="bg-purple-900/50 p-1.5 rounded-md">
+                        {selectedFile.mimeType.startsWith('image') ? (
+                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-purple-300">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                             </svg>
+                        ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-purple-300">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                            </svg>
+                        )}
+                   </div>
+                   <span className="text-xs text-slate-300 truncate max-w-[200px]" title={selectedFile.name}>{selectedFile.name}</span>
+                   <button 
+                      type="button" 
+                      onClick={clearFile}
+                      className="text-slate-500 hover:text-red-400 p-1 rounded-full hover:bg-slate-800 transition-colors"
+                   >
+                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
+                           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                       </svg>
+                   </button>
+               </div>
+           )}
         </div>
 
         <div className="relative group">
