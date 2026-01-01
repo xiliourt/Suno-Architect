@@ -1,5 +1,5 @@
 # Suno Architect - Auto Generate Suno Prompts
-- Uses Gemini Flash 2.5 (which supports free keys, see [https://aistudio.google.com/api-keys](https://aistudio.google.com/api-keys))
+- Uses Gemini Flash 2.5 or 3.0 flash (which supports free keys, see [https://aistudio.google.com/api-keys](https://aistudio.google.com/api-keys))
 - Generates
   - Song title
   - Suno style settings (weirdness %, style %, exclude, and male/female/none)
@@ -13,6 +13,10 @@
   - Support for pulling the timed lyrics from Suno
   - Support for conversion of timed lyrics JSON to LRC or SRT
   - NOTE: _For some reason the main generation API is cors locked, requiring the worker. The rest is direct via browser)_
+- OPTIONAL: Use of files for prompts
+  - Audio files for style influencing
+  - Image files to influence lyrics vibe
+  - PDF or text files to influence lore (background)
 
 ## Deploy with Cloudflare
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/xiliourt/Suno-Architect/)
