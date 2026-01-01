@@ -7,7 +7,7 @@ export const generateSunoPrompt = async (
   customApiKey?: string,
   systemInstruction?: string,
   geminiModel: string = "gemini-3-flash-preview",
-  contextFile?: FileContext
+  contextFiles: FileContext[] = []
 ): Promise<ParsedSunoOutput> => {
   const apiKey = customApiKey || process.env.API_KEY;
 
@@ -27,29 +27,40 @@ export const generateSunoPrompt = async (
   try {
     const parts: any[] = [];
     
-    // Add file context if present
-    if (contextFile) {
-        // Strip data URL prefix if present to get pure base64
-        const base64Data = contextFile.data.includes(',') 
-            ? contextFile.data.split(',')[1] 
-            : contextFile.data;
+    // Add multiple files to context
+    let hasAudio = false;
+    contextFiles.forEach(file => {
+        const base64Data = file.data.includes(',') 
+            ? file.data.split(',')[1] 
+            : file.data;
             
         parts.push({
             inlineData: {
-                mimeType: contextFile.mimeType,
+                mimeType: file.mimeType,
                 data: base64Data
             }
         });
         
-        // Add a small hint about the file
-        parts.push({ text: `[Context File Provided: ${contextFile.name}]` });
+        if (file.mimeType.startsWith('audio/')) {
+            hasAudio = true;
+        }
+    });
+
+    // Add prompt hints based on content
+    if (hasAudio) {
+        parts.push({ text: `[CRITICAL: Audio files are provided as Style References. Analyze their tempo, instrumentation, genre, and production characteristics to influence the generated Suno prompt.]` });
     }
 
-    // Add user text prompt (even if empty string, though UI prevents that usually)
+    if (contextFiles.length > 0) {
+        const fileNames = contextFiles.map(f => f.name).join(', ');
+        parts.push({ text: `[Context Files Provided: ${fileNames}]` });
+    }
+
+    // Add user text prompt
     if (userInput) {
         parts.push({ text: userInput });
-    } else if (contextFile) {
-        parts.push({ text: "Create a song based on this file context." });
+    } else if (contextFiles.length > 0) {
+        parts.push({ text: "Generate a professional Suno AI prompt based on the provided context files." });
     }
 
     const response = await ai.models.generateContent({
@@ -86,20 +97,15 @@ export const groupLyricsByLines = async (
   if (!apiKey) throw new Error("API Key required for smart grouping.");
 
   // 1. Prepare Data
-  // Round timestamps to 2 decimal places to significantly reduce token count.
   const allSimplifiedWords = alignedWords.map(w => ({ 
       w: w.word.trim(), 
       s: Number(w.start_s.toFixed(2)), 
       e: Number(w.end_s.toFixed(2)) 
   }));
 
-  // If no pseudoLines provided, treat the whole list as one big line to start (fallback)
-  // But ideally, VisualizerSection should always pass pseudoLines.
   const inputLines = pseudoLines && pseudoLines.length > 0 ? pseudoLines : [alignedWords];
 
   // 2. Batching Strategy
-  // We cannot send 500+ words in one JSON prompt efficiently (latency/complexity).
-  // We group pseudo-lines into batches of ~75 words.
   const BATCH_WORD_LIMIT = 75;
   const batches: any[][] = [];
   
@@ -107,14 +113,12 @@ export const groupLyricsByLines = async (
   let currentWordCount = 0;
 
   for (const line of inputLines) {
-      // Simplify the line structure for the prompt
       const simplifiedLine = line.map(w => ({ 
           w: w.word.trim(), 
           s: Number(w.start_s.toFixed(2)), 
           e: Number(w.end_s.toFixed(2)) 
       }));
 
-      // If adding this line exceeds limit, push current batch and start new
       if (currentWordCount + simplifiedLine.length > BATCH_WORD_LIMIT && currentBatch.length > 0) {
           batches.push(currentBatch);
           currentBatch = [];
@@ -126,20 +130,16 @@ export const groupLyricsByLines = async (
   }
   if (currentBatch.length > 0) batches.push(currentBatch);
 
-  // 3. Process Batches Sequentially (to avoid rate limits and ensure order)
   const finalLines: AlignedWord[][] = [];
 
   for (let i = 0; i < batches.length; i++) {
-      const batchDraft = batches[i]; // Array of arrays (lines)
+      const batchDraft = batches[i];
       
       try {
           const batchResult = await processBatchWithGemini(batchDraft, lyrics, apiKey, modelName, i, batches.length);
           finalLines.push(...batchResult);
       } catch (err) {
           console.error(`Batch ${i+1} failed, falling back to original draft for this section.`, err);
-          // Fallback: convert the simplified batch draft back to full AlignedWord structure
-          // We need to map back to the original objects in alignedWords to preserve exact precision if needed,
-          // but reconstruction is fine for visualizer.
           const fallbackLines = batchDraft.map(line => line.map((s: any) => ({
               word: s.w,
               start_s: s.s,
@@ -154,11 +154,8 @@ export const groupLyricsByLines = async (
   return finalLines;
 };
 
-/**
- * Helper to process a single batch of words.
- */
 const processBatchWithGemini = async (
-    batchDraft: any[][], // Array of lines, where each line is array of {w,s,e}
+    batchDraft: any[][], 
     fullLyrics: string,
     apiKey: string,
     modelName: string,
@@ -166,9 +163,6 @@ const processBatchWithGemini = async (
     totalBatches: number
 ): Promise<AlignedWord[][]> => {
     const ai = new GoogleGenAI({ apiKey });
-
-    // Pre-process full lyrics into lines to help Gemini match structure instantly
-    // This JSON structure is easier for LLM to map against than raw text block
     const lyricLines = fullLyrics.split('\n').map(l => l.trim()).filter(l => l);
     const lyricMap = lyricLines.reduce((acc, line, i) => {
         acc[i + 1] = line;
@@ -224,29 +218,11 @@ const processBatchWithGemini = async (
     throw new Error("Invalid JSON structure from AI");
 };
 
-/**
- * Helper to remove trailing hyphens/dashes from end of lines
- * This fixes the issue where the model uses "-" as a caesura at line end.
- */
 const cleanTrailingHyphens = (text: string): string => {
     if (!text) return "";
-    // Matches any dash-like char at end of line (multiline)
-    // - normal hyphen
-    // – en dash
-    // — em dash
     return text.replace(/[ \t]*[-–—]+[ \t]*$/gm, "");
 };
 
-/**
- * Parses the raw markdown response.
- * Expected structure (Based on STRICT_OUTPUT_SUFFIX):
- * Block 1: Style
- * Block 2: Title
- * Block 3: Exclude Styles
- * Text: Advanced Parameters (Vocal Gender, Weirdness, Style Influence)
- * Block 4: Lyrics with Tags
- * Block 5: Lyrics Alone
- */
 const parseResponse = (fullText: string): ParsedSunoOutput => {
   const result: ParsedSunoOutput = {
     style: "",
@@ -269,21 +245,12 @@ const parseResponse = (fullText: string): ParsedSunoOutput => {
     matches.push(match[1].trim());
   }
 
-  // Map blocks based on fixed order requested in prompt
-  // 1. Style
   if (matches.length > 0) result.style = matches[0];
-  // 2. Title
   if (matches.length > 1) result.title = matches[1];
-  // 3. Exclude Styles
   if (matches.length > 2) result.excludeStyles = matches[2] === "None" ? "" : matches[2];
-  // 4. Lyrics (Formatted)
   if (matches.length > 3) result.lyricsWithTags = cleanTrailingHyphens(matches[3]);
-  // 5. Lyrics (Clean)
   if (matches.length > 4) result.lyricsAlone = cleanTrailingHyphens(matches[4]);
 
-  // Extract Advanced Parameters (Plain text looking for specific keys)
-  // We use a cleaner that removes Markdown list characters (*, -) and leading whitespace, 
-  // but preserves the end of the line (e.g. 50% or (Tenor))
   const paramLines = fullText.split('\n').filter(line => 
     line.toLowerCase().includes('vocal gender') || 
     line.toLowerCase().includes('weirdness') || 
@@ -292,8 +259,6 @@ const parseResponse = (fullText: string): ParsedSunoOutput => {
 
   if (paramLines.length > 0) {
     result.advancedParams = paramLines.join('\n');
-    
-    // Parse individual values for JS generation
     paramLines.forEach(line => {
         const lowerLine = line.toLowerCase();
         if (lowerLine.includes('vocal gender')) {
@@ -309,27 +274,20 @@ const parseResponse = (fullText: string): ParsedSunoOutput => {
     });
   }
 
-  // Generate JS Code
   result.javascriptCode = generateJsCode(result);
-
   return result;
 };
 
 const generateJsCode = (data: ParsedSunoOutput): string => {
     return `
-// --- Helper Function for Text Inputs ---
 function setNativeValue(element, value) {
     if (!element) return;
     const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
     const prototype = Object.getPrototypeOf(element);
     const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, "value").set;
-    
     if (valueSetter && valueSetter !== prototypeValueSetter) { prototypeValueSetter.call(element, value); } else { valueSetter.call(element, value); }
-    
     element.dispatchEvent(new Event('input', { bubbles: true }));
 }
-
-// --- Helper for Sliders ---
 function adjustSlider(sliderText, targetValue) {
     const slider = document.querySelector(\`div[role="slider"][aria-label="\${sliderText}"]\`);
     if (slider) {
@@ -337,138 +295,81 @@ function adjustSlider(sliderText, targetValue) {
         const pressKey = (key) => {
             slider.dispatchEvent(new KeyboardEvent('keydown', { key: key, code: key, bubbles: true, cancelable: true }));
         };
-
         if (slider.dataset.intervalId) clearInterval(slider.dataset.intervalId);
-
         const interval = setInterval(() => {
             const currentVal = parseFloat(slider.getAttribute('aria-valuenow'));
             if (Math.abs(currentVal - targetValue) < 1) { clearInterval(interval); return; }
             if (currentVal > targetValue) { pressKey('ArrowLeft'); } 
             else if (currentVal < targetValue) { pressKey('ArrowRight'); } 
         }, 10);
-        
         slider.dataset.intervalId = interval;
-    } else { console.warn(\`Slider "\${sliderText}" not found.\`); }
+    }
 }
-
-// --- Helper for Gender Buttons ---
 function setVocalGender(targetGender) {
     const buttons = document.querySelectorAll('button');
     for (const btn of buttons) {
         const internalSpan = btn.querySelector('span.relative.flex.flex-row.items-center.justify-center.gap-1');
         if (!internalSpan) continue;
-        
         const label = internalSpan.textContent.trim();
-        
         if (label === 'Male' || label === 'Female') {
             const isSelected = btn.getAttribute('data-selected') === 'true';
             let shouldBeSelected = false;
-            
             if (targetGender === 'Male' && label === 'Male') shouldBeSelected = true;
             else if (targetGender === 'Female' && label === 'Female') shouldBeSelected = true;
             if (isSelected !== shouldBeSelected) { btn.click(); }
         }
     }
 }
-
-
-// --- MAIN EXECUTION ---
-// 1. Set Text Fields
 const lyricsBlock = document.querySelector('textarea[placeholder="Write some lyrics or a prompt — or leave blank for instrumental"]');
 setNativeValue(lyricsBlock, ${JSON.stringify(data.lyricsWithTags)});
-
 const stylesBlock = document.querySelectorAll('textarea')[1];
 setNativeValue(stylesBlock, ${JSON.stringify(data.style)});
-
 const excludeStyles = document.querySelector('input[placeholder="Exclude styles"]');
 setNativeValue(excludeStyles, ${JSON.stringify(data.excludeStyles)});
-
 const songTitle = document.querySelector('input[placeholder="Song Title (Optional)"]');
 setNativeValue(songTitle, ${JSON.stringify(data.title)});
-
-// 2. Set Sliders
 adjustSlider('Weirdness', ${data.weirdness}); 
 adjustSlider('Style Influence', ${data.styleInfluence});
-
-// 3. Set Gender
 setVocalGender('${data.vocalGender}');
 `;
 };
 
-// --- LYRIC UTILITIES (Shared between Visualizer and History) ---
-
 export const STOP_WORDS = new Set(['the', 'and', 'a', 'to', 'of', 'in', 'it', 'is', 'that', 'you', 'he', 'she', 'was', 'for', 'on', 'are', 'as', 'with', 'his', 'they', 'at', 'be', 'this', 'have', 'from', 'or', 'one', 'had', 'by', 'word', 'but', 'not', 'what', 'all', 'were', 'we', 'when', 'your', 'can', 'said', 'there', 'use', 'an', 'each', 'which', 'she', 'do', 'how', 'their', 'if', 'will', 'up', 'other', 'about', 'out', 'many', 'then', 'them', 'these', 'so', 'some', 'her', 'would', 'make', 'like', 'him', 'into', 'time', 'has', 'look', 'two', 'more', 'write', 'go', 'see', 'number', 'no', 'way', 'could', 'people', 'my', 'than', 'first', 'water', 'been', 'call', 'who', 'oil', 'its', 'now', 'find']);
 
-/**
- * Enhanced Helper: Filter out meta words AND repair fragmented tokens.
- */
 export const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
-    // Phase 1: Strip Brackets/Tags
     const clean: AlignedWord[] = [];
     let bracketDepth = 0;
-
     for (const w of aligned) {
         const originalWord = w.word;
         let cleanWordBuilder = "";
-        
         for (let i = 0; i < originalWord.length; i++) {
             const char = originalWord[i];
-            if (char === '[') {
-                bracketDepth++;
-                continue;
-            }
-            if (char === ']') {
-                if (bracketDepth > 0) bracketDepth--;
-                continue;
-            }
-            
-            if (bracketDepth === 0) {
-                cleanWordBuilder += char;
-            }
+            if (char === '[') { bracketDepth++; continue; }
+            if (char === ']') { if (bracketDepth > 0) bracketDepth--; continue; }
+            if (bracketDepth === 0) cleanWordBuilder += char;
         }
-        
         const trimmed = cleanWordBuilder.trim();
-        
         if (trimmed.length > 0) {
-            clean.push({
-                ...w,
-                word: trimmed
-            });
+            clean.push({ ...w, word: trimmed });
         }
     }
-
-    // Phase 2: Repair Fragmentation (Phantom Spaces)
     if (clean.length === 0) return [];
-
     const fixed: AlignedWord[] = [];
     let current = clean[0];
-
     for (let i = 1; i < clean.length; i++) {
             const next = clean[i];
             const currText = current.word.trim();
             const nextText = next.word.trim();
-            
-            const isFragment = 
-                /['’]$/.test(currText) || 
-                /^['’]/.test(nextText) ||
-                /^['’]+$/.test(currText) ||
-                /^['’]+$/.test(nextText);
-            
+            const isFragment = /['’]$/.test(currText) || /^['’]/.test(nextText) || /^['’]+$/.test(currText) || /^['’]+$/.test(nextText);
             const gap = next.start_s - current.end_s;
-            
             if (isFragment && gap < 0.5) {
-                current = {
-                    ...current,
-                    word: currText + nextText, 
-                    end_s: next.end_s 
-                };
+                current = { ...current, word: currText + nextText, end_s: next.end_s };
             } else {
                 fixed.push(current);
                 current = next;
             }
     }
     fixed.push(current);
-    
     return fixed;
 };
 
@@ -501,10 +402,7 @@ export const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
     const GAP_THRESHOLD = 0.5;
     const MAX_CHARS = 40; 
     cleanAligned.forEach((word, idx) => {
-        if (idx === 0) {
-            currentLine.push(word);
-            return;
-        }
+        if (idx === 0) { currentLine.push(word); return; }
         const prevWord = cleanAligned[idx - 1];
         const timeGap = word.start_s - prevWord.end_s;
         const currentLen = currentLine.reduce((sum, w) => sum + w.word.length + 1, 0);
@@ -525,51 +423,30 @@ export const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
 export const matchWordsToPrompt = (aligned: AlignedWord[], promptText: string): AlignedWord[][] => {
     const cleanAligned = getCleanAlignedWords(aligned);
     if (cleanAligned.length === 0) return [];
-
-    const promptLines = stripMetaTags(promptText)
-        .split('\n')
-        .map(l => l.trim())
-        .filter(l => l.length > 0);
-    
+    const promptLines = stripMetaTags(promptText).split('\n').map(l => l.trim()).filter(l => l.length > 0);
     if (promptLines.length === 0) return groupWordsByTiming(cleanAligned);
-
     type PromptToken = { text: string; lineIndex: number; isLineStart: boolean };
     const tokens: PromptToken[] = [];
-    
     promptLines.forEach((line, idx) => {
         const words = line.split(/\s+/).map(cleanStringForMatch).filter(w => w.length > 0);
-        words.forEach((w, wIdx) => tokens.push({ 
-            text: w, 
-            lineIndex: idx,
-            isLineStart: wIdx === 0 
-        }));
+        words.forEach((w, wIdx) => tokens.push({ text: w, lineIndex: idx, isLineStart: wIdx === 0 }));
     });
-
     const groups: AlignedWord[][] = [];
     let currentGroup: AlignedWord[] = [];
     let currentLineIndex = 0;
     let tokenPtr = 0;
     let wordsSinceLastMatch = 0; 
-
     for (let i = 0; i < cleanAligned.length; i++) {
         const wordObj = cleanAligned[i];
         const cleanWord = cleanStringForMatch(wordObj.word);
-
-        if (!cleanWord) {
-            currentGroup.push(wordObj);
-            continue;
-        }
-
+        if (!cleanWord) { currentGroup.push(wordObj); continue; }
         let bestMatchOffset = -1;
         const isLost = wordsSinceLastMatch > 4; 
         const MAX_LOOKAHEAD = isLost ? 1000 : 200; 
         const searchLimit = Math.min(tokens.length - tokenPtr, MAX_LOOKAHEAD);
-
         for (let lookahead = 0; lookahead < searchLimit; lookahead++) {
             const target = tokens[tokenPtr + lookahead];
-            const isExact = target.text === cleanWord;
-            const isMatch = isExact || (!isLost && (target.text.includes(cleanWord) || cleanWord.includes(target.text)));
-
+            const isMatch = target.text === cleanWord || (!isLost && (target.text.includes(cleanWord) || cleanWord.includes(target.text)));
             if (isMatch) {
                 let contextMatch = false;
                 if (i + 1 < cleanAligned.length) {
@@ -578,47 +455,23 @@ export const matchWordsToPrompt = (aligned: AlignedWord[], promptText: string): 
                             for (let offset = 1; offset <= 3; offset++) {
                                 if (tokenPtr + lookahead + offset < tokens.length) {
                                     const nextToken = tokens[tokenPtr + lookahead + offset].text;
-                                    if (nextToken === nextAudio || nextToken.includes(nextAudio) || nextAudio.includes(nextToken)) {
-                                        contextMatch = true;
-                                        break;
-                                    }
+                                    if (nextToken === nextAudio || nextToken.includes(nextAudio) || nextAudio.includes(nextToken)) { contextMatch = true; break; }
                                 }
                             }
-                    } else {
-                        contextMatch = true;
-                    }
+                    } else { contextMatch = true; }
                 }
-
-                if (lookahead < 3) {
-                    bestMatchOffset = lookahead;
-                    break;
-                }
-                const isCommon = cleanWord.length < 3 || STOP_WORDS.has(cleanWord);
-                if (contextMatch) {
-                    bestMatchOffset = lookahead;
-                    break;
-                }
-                if (isLost && !isCommon && isExact) {
-                        if (target.isLineStart || lookahead < 20) {
-                            bestMatchOffset = lookahead;
-                            break;
-                        }
+                if (lookahead < 3 || contextMatch) { bestMatchOffset = lookahead; break; }
+                if (isLost && !STOP_WORDS.has(cleanWord) && target.text === cleanWord) {
+                        if (target.isLineStart || lookahead < 20) { bestMatchOffset = lookahead; break; }
                 }
             }
         }
-
         if (bestMatchOffset !== -1) {
             const target = tokens[tokenPtr + bestMatchOffset];
-            if (target.lineIndex > currentLineIndex) {
-                if (currentGroup.length > 0) groups.push(currentGroup);
-                currentGroup = [];
-                currentLineIndex = target.lineIndex;
-            }
+            if (target.lineIndex > currentLineIndex) { if (currentGroup.length > 0) groups.push(currentGroup); currentGroup = []; currentLineIndex = target.lineIndex; }
             tokenPtr += bestMatchOffset + 1;
             wordsSinceLastMatch = 0; 
-        } else {
-            wordsSinceLastMatch++;
-        }
+        } else { wordsSinceLastMatch++; }
         currentGroup.push(wordObj);
     }
     if (currentGroup.length > 0) groups.push(currentGroup);

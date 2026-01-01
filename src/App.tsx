@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import InputSection from './components/InputSection';
 import OutputSection from './components/OutputSection';
@@ -20,7 +21,6 @@ const App: React.FC = () => {
 
   const [view, setView] = useState<ViewMode>('generator');
   
-  // Initialize history from localStorage safely
   const [history, setHistory] = useState<SunoClip[]>(() => {
     try {
       const saved = localStorage.getItem('suno_history');
@@ -34,7 +34,6 @@ const App: React.FC = () => {
   const [customApiKey, setCustomApiKey] = useState('');
   const [isKeyValid, setIsKeyValid] = useState(false);
   
-  // Gemini Model State
   const [geminiModel, setGeminiModel] = useState<string>(() => {
       return localStorage.getItem('gemini_model') || 'gemini-3-flash-preview';
   });
@@ -44,21 +43,18 @@ const App: React.FC = () => {
       localStorage.setItem('gemini_model', model);
   };
   
-  // Suno Configuration State
   const [isSunoModalOpen, setIsSunoModalOpen] = useState(false);
   const [sunoCookie, setSunoCookie] = useState('');
-  const [sunoModel, setSunoModel] = useState('chirp-bluejay'); // Default to V4.5+
+  const [sunoModel, setSunoModel] = useState('chirp-bluejay');
   const [sunoCredits, setSunoCredits] = useState<number | null>(null);
   const [isSyncingHistory, setIsSyncingHistory] = useState(false);
 
-  // Prompt Settings State
   const [promptSettings, setPromptSettings] = useState<PromptSettings>(() => {
       try {
           const saved = localStorage.getItem('suno_prompt_settings');
           if (saved) return JSON.parse(saved);
       } catch(e) {}
       
-      // Default Initial State
       const kb = buildKnowledgeBase(DEFAULT_SUNO_LIBRARY);
       return {
           version: 'v1',
@@ -68,20 +64,16 @@ const App: React.FC = () => {
       };
   });
 
-  // Ref to prevent double fetching in strict mode
   const historyFetchedRef = useRef(false);
 
-  // Load Suno Cookie and Model from local storage on mount
   useEffect(() => {
     const savedCookie = localStorage.getItem('suno_cookie');
     const savedModel = localStorage.getItem('suno_model');
     
     if (savedCookie) {
       setSunoCookie(savedCookie);
-      // Try to fetch credits silently on load if cookie exists
       getSunoCredits(savedCookie).then(setSunoCredits).catch(console.error);
       
-      // Fetch History if not already fetched
       if (!historyFetchedRef.current) {
           historyFetchedRef.current = true;
           fetchAndMergeSunoHistory(savedCookie);
@@ -92,12 +84,10 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Persist history whenever it changes
   useEffect(() => {
     localStorage.setItem('suno_history', JSON.stringify(history));
   }, [history]);
 
-  // Persist prompt settings
   useEffect(() => {
       localStorage.setItem('suno_prompt_settings', JSON.stringify(promptSettings));
   }, [promptSettings]);
@@ -107,24 +97,20 @@ const App: React.FC = () => {
         const feedData = await getSunoFeed(cookie);
         if (feedData && Array.isArray(feedData.clips)) {
             const newClips: SunoClip[] = feedData.clips.map((clip: any) => {
-                // Map the remote clip to our SunoClip structure
                 const metadata = clip.metadata || {};
                 const tags = metadata.tags || '';
                 const prompt = metadata.prompt || '';
                 const title = clip.title || 'Untitled';
 
-                // Construct a faux originalData to make it compatible with our editor
-                // We leave fullResponse empty to indicate this is an API pull
                 const originalData: ParsedSunoOutput = {
                     style: tags,
                     title: title,
                     excludeStyles: metadata.negative_tags || '',
-                    advancedParams: '', // Can't easily reconstruct raw params string
-                    vocalGender: '', // Could try to extract from tags
+                    advancedParams: '',
+                    vocalGender: '',
                     weirdness: metadata.control_sliders?.weirdness_constraint ? Math.round(metadata.control_sliders.weirdness_constraint * 100) : 50,
                     styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
                     lyricsWithTags: prompt,
-                    // Strip meta tags (anything in []) for the clean lyrics version
                     lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(),
                     javascriptCode: '',
                     fullResponse: ''
@@ -146,27 +132,18 @@ const App: React.FC = () => {
             });
 
             setHistory(prevHistory => {
-                // Merge strategies:
-                // 1. Keep all local drafts (ids starting with 'draft_')
-                // 2. Add new clips from Suno if they don't exist in local history
-                // 3. Update existing Suno clips in local history with fresh data (e.g. status, image url)
-                // 4. PRESERVE rich originalData if existing clip was generated by Architect
-                
-                const existingMap = new Map(prevHistory.map(item => [item.id, item]));
+                // Fix: Explicitly type the Map to ensure 'existing' is correctly typed as SunoClip
+                const existingMap = new Map<string, SunoClip>(prevHistory.map(item => [item.id, item]));
                 
                 newClips.forEach(newClip => {
                     if (existingMap.has(newClip.id)) {
                         const existing = existingMap.get(newClip.id)!;
-                        // Check if existing item has "Rich" data (fullResponse present)
                         const isExistingRich = !!existing.originalData?.fullResponse;
                         
                         const mergedClip: SunoClip = {
                             ...newClip,
-                            // If we have rich data locally, keep it. Otherwise use the API data.
                             originalData: isExistingRich ? existing.originalData : newClip.originalData,
                             metadata: isExistingRich ? existing.metadata : newClip.metadata,
-                            
-                            // Preserve local enhancements
                             alignmentData: existing.alignmentData || newClip.alignmentData,
                             lrcContent: existing.lrcContent || newClip.lrcContent,
                             srtContent: existing.srtContent || newClip.srtContent,
@@ -177,8 +154,8 @@ const App: React.FC = () => {
                     }
                 });
 
-                // Convert back to array and sort by date descending
-                const merged = Array.from(existingMap.values()).sort((a, b) => 
+                // Fix: Explicitly type the sort parameters to resolve 'unknown' property access
+                const merged = Array.from(existingMap.values()).sort((a: SunoClip, b: SunoClip) => 
                     new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
                 );
                 
@@ -199,7 +176,6 @@ const App: React.FC = () => {
     try {
         const feedData = await getSunoFeed(sunoCookie);
         if (feedData && Array.isArray(feedData.clips)) {
-            // Map new clips
             const newClips: SunoClip[] = feedData.clips.map((clip: any) => {
                 const metadata = clip.metadata || {};
                 const tags = metadata.tags || '';
@@ -215,7 +191,6 @@ const App: React.FC = () => {
                     weirdness: metadata.control_sliders?.weirdness_constraint ? Math.round(metadata.control_sliders.weirdness_constraint * 100) : 50,
                     styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
                     lyricsWithTags: prompt,
-                    // Strip meta tags (anything in []) for the clean lyrics version
                     lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(),
                     javascriptCode: '',
                     fullResponse: ''
@@ -237,22 +212,19 @@ const App: React.FC = () => {
             });
 
             setHistory(prev => {
-                // 1. Remove Drafts
                 const nonDrafts = prev.filter(p => !p.id.startsWith('draft_'));
-                const map = new Map(nonDrafts.map(c => [c.id, c]));
+                // Fix: Explicitly type the Map to ensure 'existing' is correctly typed as SunoClip
+                const map = new Map<string, SunoClip>(nonDrafts.map(c => [c.id, c]));
 
-                // 2. Merge New Clips (preserving local rich data)
                 newClips.forEach(newClip => {
                     if (map.has(newClip.id)) {
                          const existing = map.get(newClip.id)!;
-                         // Check if existing item has "Rich" data (fullResponse present)
                          const isRich = !!existing.originalData?.fullResponse;
                          
                          map.set(newClip.id, {
                              ...newClip,
                              originalData: isRich ? existing.originalData : newClip.originalData,
                              metadata: isRich ? existing.metadata : newClip.metadata,
-                             // Preserve local enhancements
                              alignmentData: existing.alignmentData || newClip.alignmentData,
                              lrcContent: existing.lrcContent || newClip.lrcContent,
                              srtContent: existing.srtContent || newClip.srtContent,
@@ -262,7 +234,8 @@ const App: React.FC = () => {
                     }
                 });
 
-                return Array.from(map.values()).sort((a, b) => 
+                // Fix: Explicitly type the sort parameters to resolve 'unknown' property access
+                return Array.from(map.values()).sort((a: SunoClip, b: SunoClip) => 
                     new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
                 );
             });
@@ -281,10 +254,8 @@ const App: React.FC = () => {
 
     if (cookie) {
       localStorage.setItem('suno_cookie', cookie);
-      // Refresh credits when saved
       getSunoCredits(cookie).then(setSunoCredits).catch(() => setSunoCredits(null));
-      // Refresh history
-      historyFetchedRef.current = true; // reset logic not strictly needed here but useful if we wanted to enforce single fetch logic
+      historyFetchedRef.current = true;
       fetchAndMergeSunoHistory(cookie);
     } else {
       localStorage.removeItem('suno_cookie');
@@ -302,14 +273,11 @@ const App: React.FC = () => {
   };
 
   const handleSyncSuccess = async (response: any, originalData: ParsedSunoOutput) => {
-    // 1. Refresh Credits
     if (sunoCookie) {
         getSunoCredits(sunoCookie).then(setSunoCredits).catch(console.error);
     }
 
-    // 2. Update Metadata and History
     if (response && response.clips && Array.isArray(response.clips)) {
-        // Trigger metadata updates asynchronously for each clip
         response.clips.forEach((clip: any) => {
              updateSunoMetadata(clip.id, originalData, sunoCookie)
                 .then(() => console.log(`Metadata updated for ${clip.id}`))
@@ -321,7 +289,7 @@ const App: React.FC = () => {
             title: clip.title || 'Untitled',
             created_at: clip.created_at,
             model_name: clip.model_name,
-            imageUrl: clip.image_url, // Store image URL if returned
+            imageUrl: clip.image_url,
             imageLargeUrl: clip.image_large_url,
             metadata: {
                 tags: clip.metadata?.tags || '',
@@ -330,26 +298,23 @@ const App: React.FC = () => {
             originalData: originalData
         }));
         
-        // Add new clips to the beginning of the history
         setHistory(prevHistory => [...newClips, ...prevHistory]);
     }
   };
 
-  const handleGenerate = async (prompt: string, file?: FileContext) => {
+  const handleGenerate = async (prompt: string, files: FileContext[] = []) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null, result: null }));
     try {
-      // Pass the customized system prompt, gemini model, and optional file
       const result = await generateSunoPrompt(
           prompt, 
           customApiKey, 
           promptSettings.customSystemPrompt, 
           geminiModel, 
-          file
+          files
       );
       
       setState({ isLoading: false, error: null, result });
       
-      // Auto-save to history as draft
       const draftClip: SunoClip = {
           id: `draft_${Date.now()}`,
           title: result.title || 'Untitled Prompt',
@@ -374,15 +339,12 @@ const App: React.FC = () => {
 
   const handleUpdateClip = useCallback((id: string, updates: Partial<SunoClip>) => {
     setHistory(prev => {
-        // Optimization: check if update is actually needed or if ID exists
         const exists = prev.some(c => c.id === id);
         if (!exists) return prev; 
-        
         return prev.map(clip => clip.id === id ? { ...clip, ...updates } : clip);
     });
   }, []);
 
-  // Helper to render content based on view
   const renderContent = () => {
       switch(view) {
           case 'history':
@@ -435,10 +397,10 @@ const App: React.FC = () => {
                                 <span className="text-purple-500 mr-2">•</span> Be specific about the genre (e.g., "Darkwave" vs "Electronic").
                             </li>
                             <li className="flex items-start">
-                                <span className="text-purple-500 mr-2">•</span> Mention vocal gender and mood.
+                                <span className="text-purple-500 mr-2">•</span> Upload an <strong>Audio Track</strong> to use as a style reference.
                             </li>
                             <li className="flex items-start">
-                                <span className="text-purple-500 mr-2">•</span> Paste specific text/stories for the AI to rewrite.
+                                <span className="text-purple-500 mr-2">•</span> Use <strong>Images</strong> to inspire the theme and mood.
                             </li>
                             </ul>
                         </div>
@@ -504,7 +466,6 @@ const App: React.FC = () => {
         currentCredits={sunoCredits}
       />
 
-      {/* View Switcher */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 w-full flex justify-center">
           <div className="bg-slate-800/50 p-1 rounded-xl flex space-x-1 border border-slate-700/50 backdrop-blur-sm">
              <button
@@ -540,7 +501,6 @@ const App: React.FC = () => {
                     : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
                 }`}
              >
-                 {/* Video Camera Icon */}
                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                     <path d="M23 7l-7 5 7 5V7z" />
                     <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
