@@ -41,6 +41,13 @@ const ASPECT_RATIOS = {
   "4:3": { width: 1024, height: 768, label: "Classic (4:3)" }
 };
 
+const AUDIO_BITRATES = [
+    { label: "128 kbps (Standard)", value: 128000 },
+    { label: "192 kbps (High)", value: 192000 },
+    { label: "256 kbps (Very High)", value: 256000 },
+    { label: "320 kbps (Master)", value: 320000 },
+];
+
 const FONTS = [
     { label: "Inter (Modern Sans)", value: "Inter, sans-serif" },
     { label: "Montserrat (Geometric)", value: "Montserrat, sans-serif" },
@@ -57,6 +64,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   // Visual Settings
   const [aspectRatio, setAspectRatio] = useState<keyof typeof ASPECT_RATIOS>("16:9");
   const [customBg, setCustomBg] = useState<{ url: string, type: 'image' | 'video', name: string } | null>(null);
+  const [customAudio, setCustomAudio] = useState<{ url: string, name: string } | null>(null);
+  const [audioBitrate, setAudioBitrate] = useState(192000);
   const [imgSrc, setImgSrc] = useState<string>('');
 
   // Style Customization State
@@ -100,10 +109,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     let url = clipData.imageLargeUrl || clipData.imageUrl || `https://cdn2.suno.ai/image_large_${clipData.id}.jpeg`;
     
     // Use a Ref to ensure we only timestamp once per unique URL to prevent infinite reloads
-    // Note: We don't implement full ref caching here for simplicity, but we rely on clipData stability.
-    // If clipData is recreated repeatedly, this effect fires repeatedly.
-    // The previous bug was causing clipData to be recreated on every render loop.
-    // With loop fixed, we can safely timestamp if needed, but only if URL implies caching needs.
     if (url.includes('suno.ai') && !url.includes('?')) {
         url += `?t=${Date.now()}`;
     }
@@ -125,6 +130,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     if (!selectedClipId) return;
     setLines([]); 
     setApplyStatus('idle');
+    setCustomAudio(null); // Reset custom audio on change
 
     const loadData = async () => {
         let currentClip = history.find(c => c.id === selectedClipId);
@@ -185,7 +191,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             };
         }
         
-        // This state update is safe because the effect dependency array is now stable
         setClipData(currentClip);
 
         // --- LYRIC SOURCE LOGIC ---
@@ -204,9 +209,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                  if (res && res.aligned_words) {
                      align = res.aligned_words;
                      
-                     // CRITICAL FIX: Only call update if clip exists in history
-                     // Calling update on a manual ID that isn't in history causes App state to change 
-                     // (returning new array reference) which triggers this effect again -> Infinite Loop.
                      if (history.some(h => h.id === currentClip.id)) {
                         onUpdateClip(currentClip.id, { alignmentData: align });
                      }
@@ -244,7 +246,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     const file = e.target.files?.[0];
     if (file) {
         const url = URL.createObjectURL(file);
-        // Robust video detection: Trust extension if MIME is vague, or MIME if explicit
         let type: 'video' | 'image' = 'image';
         
         if (file.type.startsWith('video')) {
@@ -254,6 +255,19 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         }
         
         setCustomBg({ url, type, name: file.name });
+    }
+  };
+
+  const handleAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+        const url = URL.createObjectURL(file);
+        setCustomAudio({ url, name: file.name });
+        // Force pause if playing to avoid state mismatch
+        if (audioRef.current && !audioRef.current.paused) {
+            audioRef.current.pause();
+            setIsPlaying(false);
+        }
     }
   };
 
@@ -316,7 +330,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       }
   };
 
-  // Convert Hex to RGBA helper for inactive words
   const hexToRgba = (hex: string, alpha: number) => {
     let c: any;
     if(/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)){
@@ -393,7 +406,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           
-          // Determine Active Line
           let activeLineIdx = lines.findIndex(line => {
              if (line.length === 0) return false;
              const start = line[0].start_s;
@@ -401,46 +413,35 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
              return time >= start && time <= end;
           });
 
-          // Look ahead logic for silent gaps
           if (activeLineIdx === -1) {
               const upcomingIdx = lines.findIndex(line => line.length > 0 && line[0].start_s > time);
               if (upcomingIdx !== -1) {
                   const timeToStart = lines[upcomingIdx][0].start_s - time;
                   if (upcomingIdx === 0 && timeToStart > 4) {
-                       activeLineIdx = -1; // Wait at start
+                       activeLineIdx = -1;
                   } else {
-                       activeLineIdx = upcomingIdx; // Pre-select next line
+                       activeLineIdx = upcomingIdx;
                   }
               } else {
-                  activeLineIdx = lines.length - 1; // End of song
+                  activeLineIdx = lines.length - 1;
               }
           }
           
-          // --- Smooth Scrolling Logic ---
-          // Interpolate the smoothIndex towards the target activeLineIdx
           if (activeLineIdx !== -1) {
               const diff = activeLineIdx - smoothLineIdxRef.current;
-              // Snap if jump is too large (seeking)
               if (Math.abs(diff) > 4) {
                   smoothLineIdxRef.current = activeLineIdx;
               } else {
-                  // Apply smoothing factor
-                  // Use override if provided (for offline render consistency)
                   const factor = overrideSmoothing ?? smoothingFactor;
                   smoothLineIdxRef.current += diff * factor;
               }
           }
 
-          // Render range: visible lines around the smooth index
           const renderCenterIdx = smoothLineIdxRef.current;
           const baseIdx = Math.floor(renderCenterIdx);
           const PADDING = aspectRatio === "9:16" ? 60 : 40;
-          
-          // Apply Vertical Offset (0 = center, positive = down, negative = up)
-          // We default to center height / 2.
           const centerY = (height / 2) + (height * verticalOffset);
 
-          // Helper to calculate line layout (cached per frame ideally, but lightweight enough)
           const getLayout = (idx: number, scale: number) => {
               if (idx < 0 || idx >= lines.length) return null;
               const line = lines[idx];
@@ -478,13 +479,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               return { rows, totalHeight: rows.length * lineHeight, lineHeight, fontSize };
           };
 
-          // We render lines [baseIdx - 2] to [baseIdx + 3]
-          // Calculate Y offsets dynamically based on heights
           const visibleLines = [];
           for (let i = baseIdx - 2; i <= baseIdx + 3; i++) {
               if (i >= 0 && i < lines.length) {
                   const dist = Math.abs(i - renderCenterIdx);
-                  // Dynamic scaling based on distance from smooth center
                   const scale = Math.max(0.6, 1.2 - (dist * 0.3)); 
                   const opacity = Math.max(0.1, 1 - (dist * 0.5));
                   
@@ -495,36 +493,23 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               }
           }
 
-          // Positioning Strategy:
-          // We calculate pixel offsets using a CONSTANT REFERENCE SCALE (1.0)
-          // This ensures that as lines grow/shrink, the slot positions don't jump around.
-          // Only the text *inside* the slot grows/shrinks.
-          
           const fractional = renderCenterIdx - baseIdx;
-          
-          // Use Scale 1.0 for layout metrics to keep spacing consistent
           const baseLayoutRef = getLayout(baseIdx, 1.0); 
           const nextLayoutRef = getLayout(baseIdx + 1, 1.0);
           
           const baseH = baseLayoutRef ? baseLayoutRef.totalHeight : 60;
           const nextH = nextLayoutRef ? nextLayoutRef.totalHeight : 60;
           
-          // The scroll distance for 1.0 index change is roughly (Height/2 + Padding + NextHeight/2)
           const scrollDist = (baseH / 2) + PADDING + (nextH / 2);
           const pixelOffset = fractional * scrollDist;
 
-          // Draw visible lines
           visibleLines.forEach(item => {
-              // Calculate relative position (index delta)
               const relIndex = item.index - baseIdx; 
-              
-              // Estimate Y position by summing heights using REFERENCE SCALE (1.0)
               let yOffset = 0;
               
               if (relIndex === 0) {
                   yOffset = 0;
               } else if (relIndex > 0) {
-                  // Sum heights downwards
                   let hSum = baseH / 2 + PADDING; 
                   for (let k = baseIdx + 1; k < item.index; k++) {
                        const l = getLayout(k, 1.0);
@@ -534,7 +519,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                   hSum += (l ? l.totalHeight : 60) / 2;
                   yOffset = hSum;
               } else {
-                  // Sum heights upwards
                   let hSum = baseH / 2 + PADDING;
                   for (let k = baseIdx - 1; k > item.index; k--) {
                       const l = getLayout(k, 1.0);
@@ -545,10 +529,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                   yOffset = -hSum;
               }
 
-              // Final Y = ScreenCenter - PixelInterpolation + DiscreteOffset
               const drawY = centerY - pixelOffset + yOffset;
               
-              // Draw the line
               ctx.font = `bold ${item.layout.fontSize}px ${fontFamily}`;
               const startTextY = drawY - ((item.layout.rows.length - 1) * item.layout.lineHeight) / 2;
 
@@ -559,7 +541,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                   row.words.forEach((w: any) => {
                       const isWordActive = time >= w.start_s && time <= w.end_s;
                       const isWordPast = time > w.end_s;
-                      
                       const isLineActive = item.index === activeLineIdx;
 
                       if (isLineActive) {
@@ -588,18 +569,15 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           });
 
       } else if (alignment) {
-          // Fallback if no grouping (Raw word stream)
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           const cleanAligned = getCleanAlignedWords(alignment);
-          // Just center the current word
           const activeIndex = cleanAligned.findIndex(w => time >= w.start_s && time <= w.end_s);
           const upcomingIndex = cleanAligned.findIndex(w => w.start_s > time);
           
           let baseIndex = activeIndex !== -1 ? activeIndex : (upcomingIndex !== -1 ? upcomingIndex : cleanAligned.length - 1);
           if (baseIndex < 0) baseIndex = 0;
 
-          // Simple smooth scroll for raw words?
           const diff = baseIndex - smoothLineIdxRef.current;
           if (Math.abs(diff) > 5) smoothLineIdxRef.current = baseIndex;
           else {
@@ -694,10 +672,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     setIsRendering(true);
     setRenderProgress(0);
 
-    // Store previous ref to restore after render
     const originalSmoothRef = smoothLineIdxRef.current;
-    
-    // Reset to start to prevent lag artifacts at the beginning of the video
     smoothLineIdxRef.current = 0; 
 
     let fileHandle: any = null;
@@ -715,14 +690,11 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
         const duration = audioBuffer.duration;
 
-        // 2. Output Dimensions from Selection
         const { width: targetWidth, height: targetHeight } = ASPECT_RATIOS[aspectRatio];
 
-        // 3. Setup Muxer with FileSystem Strategy if available
         const filename = `${(clipData.title || 'video').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${aspectRatio.replace(':','-')}.webm`;
         let muxerTarget: any;
 
-        // Try direct disk streaming if browser supports it
         if ('showSaveFilePicker' in window) {
             try {
                 fileHandle = await (window as any).showSaveFilePicker({
@@ -737,7 +709,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             } catch (err: any) {
                 if (err.name === 'AbortError') {
                     setIsRendering(false);
-                    // Restore ref if aborted
                     smoothLineIdxRef.current = originalSmoothRef;
                     return;
                 }
@@ -763,7 +734,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             }
         });
 
-        // 4. Setup Video Encoder
         // @ts-ignore
         const videoEncoder = new VideoEncoder({
             output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
@@ -773,11 +743,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             codec: 'vp09.00.10.08',
             width: targetWidth,
             height: targetHeight,
-            bitrate: 8_000_000, // Increased bitrate for 60fps
+            bitrate: 8_000_000, 
             framerate: 60
         });
 
-        // 5. Setup Audio Encoder
         // @ts-ignore
         const audioEncoder = new AudioEncoder({
             output: (chunk: any, meta: any) => muxer.addAudioChunk(chunk, meta),
@@ -787,15 +756,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             codec: 'opus',
             numberOfChannels: 2,
             sampleRate: 48000,
-            bitrate: 128000
+            bitrate: audioBitrate // Use selected bitrate
         });
 
-        // 6. Render Video Frames with BACKPRESSURE
         const fps = 60;
         const totalFrames = Math.ceil(duration * fps);
         const ctx = canvasRef.current.getContext('2d')!;
         
-        // Ensure canvas matches target dims for the render pass
         canvasRef.current.width = targetWidth;
         canvasRef.current.height = targetHeight;
 
@@ -808,15 +775,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
             const t = i / fps;
 
-            // Sync Background Video if present
             if (customBg?.type === 'video' && customVideoRef.current) {
                 const vid = customVideoRef.current;
                 const loopTime = t % vid.duration;
-                // Since the video is paused during render, we must manually set currentTime 
-                // every frame to step through it.
-                // We compare to ensure we don't set it redundantly if timestamps match closely,
-                // BUT for paused video, setting it forces the frame update.
-                // We use a small epsilon to avoid jitter but ensure it updates.
                 if (Math.abs(vid.currentTime - loopTime) > 0.001) {
                     vid.currentTime = loopTime;
                     await new Promise<void>(resolve => {
@@ -825,9 +786,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                              resolve();
                          };
                          vid.addEventListener('seeked', onSeek);
-                         // Fallback just in case browser doesn't fire seeked quickly
-                         // (e.g. if we are close to same frame)
-                         // But we depend on seeked to ensure drawImage gets the new frame.
                     });
                 }
             }
@@ -840,14 +798,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
             frame.close();
 
-            // Yield to UI periodically
             if (i % 15 === 0) {
                 setRenderProgress((i / totalFrames) * 100);
                 await new Promise(r => setTimeout(r, 0));
             }
         }
 
-        // 7. Encode Audio (Same as before)
         const numberOfChannels = 2;
         const sourceChannels = audioBuffer.numberOfChannels;
         const audioDataLength = audioBuffer.length;
@@ -909,7 +865,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     } finally {
         setIsRendering(false);
         setRenderProgress(0);
-        // Restore ref state so preview doesn't jump back
         smoothLineIdxRef.current = originalSmoothRef;
         requestRef.current = requestAnimationFrame(animate);
     }
@@ -939,7 +894,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                       </select>
                  </div>
              </div>
-             {/* ... rest of the file ... */}
+             
              <div className="flex gap-2 items-center pt-4 border-t border-slate-700/50">
                 <input 
                     type="text" 
@@ -959,7 +914,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         {/* Main Content */}
         {selectedClipId && clipData && (
              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                 {/* ... Layout contents identical to before but using imported functions ... */}
                  {/* Left: Controls & Info */}
                  <div className="lg:col-span-1 space-y-6">
                      {/* Metadata / Lyric Source Card */}
@@ -991,7 +945,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                         </div>
                      </div>
 
-                     {/* Visual Settings Card */}
+                     {/* Media & Composition Card */}
                      <div className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 shadow-lg p-4 space-y-4">
                          {/* Cover Art */}
                          <div className="relative group rounded-lg overflow-hidden border border-slate-700/50">
@@ -999,7 +953,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                 id="source-img"
                                 src={imgSrc} 
                                 alt="Cover" 
-                                crossOrigin="anonymous" // CRITICAL FOR CANVAS EXPORT
+                                crossOrigin="anonymous" 
                                 onError={handleImageError}
                                 className={`w-full h-32 object-cover ${customBg ? 'opacity-50' : 'opacity-100'}`}
                              />
@@ -1063,7 +1017,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                      </select>
                                  </div>
 
-                                 {/* File Upload */}
+                                 {/* Background File Upload */}
                                  <div>
                                      <label className="text-xs text-slate-500 block mb-1">Custom Background</label>
                                      <label className="flex items-center justify-center w-full px-2 py-2 border border-dashed border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition-colors group bg-slate-900/50">
@@ -1080,6 +1034,42 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                              <span className="text-xs">Upload Image / Loop</span>
                                          </div>
                                      </label>
+                                 </div>
+
+                                 {/* Audio File Upload */}
+                                 <div>
+                                     <label className="text-xs text-slate-500 block mb-1">Audio Source (Override)</label>
+                                     {customAudio ? (
+                                         <div className="flex items-center justify-between bg-slate-900 border border-green-500/30 rounded p-2">
+                                             <div className="flex items-center gap-2 overflow-hidden">
+                                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-green-400 flex-shrink-0">
+                                                     <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clipRule="evenodd" />
+                                                 </svg>
+                                                 <span className="text-xs text-green-300 truncate" title={customAudio.name}>{customAudio.name}</span>
+                                             </div>
+                                             <button onClick={() => setCustomAudio(null)} className="text-slate-500 hover:text-white">
+                                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                                     <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                                                 </svg>
+                                             </button>
+                                         </div>
+                                     ) : (
+                                        <label className="flex items-center justify-center w-full px-2 py-2 border border-dashed border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition-colors group bg-slate-900/50">
+                                            <input 
+                                                type="file" 
+                                                accept="audio/*" 
+                                                className="hidden" 
+                                                onChange={handleAudioUpload}
+                                            />
+                                            <div className="flex items-center gap-2 text-slate-400 group-hover:text-white">
+                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                                    <path d="M7 4a3 3 0 016 0v6a3 3 0 11-6 0V4z" />
+                                                    <path d="M5.5 9.643a.75.75 0 00-1.5 0V10c0 3.06 2.29 5.585 5.25 5.954V17.5h-1.5a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-1.5v-1.546A6.001 6.001 0 0016 10v-.357a.75.75 0 00-1.5 0V10a4.5 4.5 0 01-9 0v-.357z" />
+                                                </svg>
+                                                <span className="text-xs">Upload Mastered File</span>
+                                            </div>
+                                        </label>
+                                     )}
                                  </div>
                          </div>
                      </div>
@@ -1130,7 +1120,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                          <audio 
                             ref={audioRef} 
                             controls 
-                            src={`https://cdn1.suno.ai/${selectedClipId}.mp3`}
+                            src={customAudio ? customAudio.url : `https://cdn1.suno.ai/${selectedClipId}.mp3`}
                             crossOrigin="anonymous" // CRITICAL FOR RECORDING
                             className="w-full h-8"
                             onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
@@ -1140,32 +1130,46 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                          />
                      </div>
 
-                     {/* Action Button */}
-                     <button
-                        onClick={startOfflineRender}
-                        disabled={isPreparing || !alignment || isRendering}
-                        className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg transition-all flex items-center justify-center gap-2
-                        ${isRendering 
-                            ? 'bg-purple-800 text-white cursor-wait' 
-                            : !alignment 
-                                ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                                : 'bg-purple-600 hover:bg-purple-500 text-white'
-                        }`}
-                     >
-                         {isRendering ? (
-                             <>
-                                <span className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></span>
-                                Rendering {Math.round(renderProgress)}%
-                             </>
-                         ) : (
-                             <>
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                                    <path d="M11.25 4.533A9.707 9.707 0 006 3a9.735 9.735 0 00-3.25.555.75.75 0 00-.5.707v14.25a.75.75 0 001 .707A8.237 8.237 0 016 18.75c1.995 0 3.823.707 5.25 1.886V4.533zM12.75 20.636A8.214 8.214 0 0118 18.75c.966 0 1.89.166 2.75.47a.75.75 0 001-.708V4.262a.75.75 0 00-.5-.707A9.735 9.735 0 0018 3a9.707 9.707 0 00-5.25 1.533v16.103z" />
-                                </svg>
-                                Fast Export (.webm)
-                             </>
-                         )}
-                     </button>
+                     {/* Action Button & Bitrate */}
+                     <div className="space-y-2">
+                         <div className="flex items-center justify-between">
+                             <label className="text-xs text-slate-500">Audio Quality</label>
+                             <select 
+                                value={audioBitrate}
+                                onChange={(e) => setAudioBitrate(Number(e.target.value))}
+                                className="bg-slate-900 border border-slate-700 rounded text-xs text-white p-1 focus:ring-1 focus:ring-purple-500"
+                             >
+                                 {AUDIO_BITRATES.map(b => (
+                                     <option key={b.value} value={b.value}>{b.label}</option>
+                                 ))}
+                             </select>
+                         </div>
+                         <button
+                            onClick={startOfflineRender}
+                            disabled={isPreparing || !alignment || isRendering}
+                            className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg transition-all flex items-center justify-center gap-2
+                            ${isRendering 
+                                ? 'bg-purple-800 text-white cursor-wait' 
+                                : !alignment 
+                                    ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                                    : 'bg-purple-600 hover:bg-purple-500 text-white'
+                            }`}
+                         >
+                             {isRendering ? (
+                                 <>
+                                    <span className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></span>
+                                    Rendering {Math.round(renderProgress)}%
+                                 </>
+                             ) : (
+                                 <>
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                                        <path d="M11.25 4.533A9.707 9.707 0 006 3a9.735 9.735 0 00-3.25.555.75.75 0 00-.5.707v14.25a.75.75 0 001 .707A8.237 8.237 0 016 18.75c1.995 0 3.823.707 5.25 1.886V4.533zM12.75 20.636A8.214 8.214 0 0118 18.75c.966 0 1.89.166 2.75.47a.75.75 0 001-.708V4.262a.75.75 0 00-.5-.707A9.735 9.735 0 0018 3a9.707 9.707 0 00-5.25 1.533v16.103z" />
+                                    </svg>
+                                    Fast Export (.webm)
+                                 </>
+                             )}
+                         </button>
+                     </div>
                      {isRendering && (
                          <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden mt-2">
                              <div className="bg-purple-500 h-full transition-all duration-300" style={{ width: `${renderProgress}%` }}></div>
