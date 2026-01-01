@@ -1,49 +1,53 @@
+
 import React, { useState, useRef } from 'react';
 import { FileContext } from '../types';
 
 interface InputSectionProps {
-  onGenerate: (prompt: string, file?: FileContext) => void;
+  onGenerate: (prompt: string, files: FileContext[]) => void;
   isLoading: boolean;
   apiKeyValid: boolean;
 }
 
 const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiKeyValid }) => {
   const [prompt, setPrompt] = useState('');
-  const [selectedFile, setSelectedFile] = useState<FileContext | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<FileContext[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if ((prompt.trim() || selectedFile) && apiKeyValid) {
-      onGenerate(prompt, selectedFile || undefined);
+    if ((prompt.trim() || selectedFiles.length > 0) && apiKeyValid) {
+      onGenerate(prompt, selectedFiles);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setSelectedFile({
-            name: file.name,
-            mimeType: file.type,
-            data: event.target.result as string
-          });
-        }
-      };
-      reader.readAsDataURL(file);
+    const files = e.target.files;
+    if (files) {
+      // Fix: Cast Array.from(files) to File[] to ensure 'file' is correctly typed for property access and readAsDataURL
+      (Array.from(files) as File[]).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          if (event.target?.result) {
+            setSelectedFiles(prev => [...prev, {
+              name: file.name,
+              mimeType: file.type,
+              data: event.target.result as string
+            }]);
+          }
+        };
+        reader.readAsDataURL(file);
+      });
     }
   };
 
-  const clearFile = () => {
-    setSelectedFile(null);
+  const removeFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+        fileInputRef.current.value = '';
     }
   };
 
-  const isButtonDisabled = isLoading || (!prompt.trim() && !selectedFile) || !apiKeyValid;
+  const isButtonDisabled = isLoading || (!prompt.trim() && selectedFiles.length === 0) || !apiKeyValid;
 
   return (
     <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-2xl p-6 shadow-xl relative">
@@ -60,58 +64,80 @@ const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiK
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             disabled={isLoading}
-            placeholder="E.g., An epic power ballad about a space explorer lost in the void. Or upload an image for inspiration."
+            placeholder="E.g., An epic power ballad about a space explorer lost in the void. Or upload media for inspiration."
             className="w-full h-32 bg-slate-900 border border-slate-700 rounded-xl p-4 text-slate-200 placeholder-slate-600 focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all resize-none text-base"
           />
         </div>
 
-        {/* File Upload Context Area */}
-        <div>
+        {/* Multi-File Upload Context Area */}
+        <div className="space-y-3">
            <input 
               type="file" 
               ref={fileInputRef}
               onChange={handleFileChange}
-              accept="image/*,text/plain,application/pdf"
+              accept="image/*,text/plain,application/pdf,audio/*"
+              multiple
               className="hidden"
            />
            
-           {!selectedFile ? (
+           <div className="flex flex-wrap gap-2">
+               {selectedFiles.map((file, idx) => {
+                   const isAudio = file.mimeType.startsWith('audio/');
+                   const isImage = file.mimeType.startsWith('image/');
+                   const isDoc = file.mimeType.includes('pdf') || file.mimeType.includes('plain');
+                   
+                   return (
+                       <div key={idx} className={`flex items-center gap-2 bg-slate-900 border ${isAudio ? 'border-pink-500/50' : 'border-slate-700'} rounded-lg p-2 animate-in fade-in zoom-in-95 duration-200`}>
+                           <div className={`${isAudio ? 'bg-pink-900/50' : 'bg-purple-900/50'} p-1.5 rounded-md`}>
+                                {isAudio ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-pink-300">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l.31-.088a2.25 2.25 0 001.632-2.163V6.553zM5.25 18.103V9.5a2.25 2.25 0 011.569-2.141l9.431-3.144a2.25 2.25 0 012.75 2.141v10.503a2.25 2.25 0 01-1.569 2.141l-9.431 3.144a2.25 2.25 0 01-2.75-2.141V18.103z" />
+                                    </svg>
+                                ) : isImage ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-purple-300">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                                     </svg>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-purple-300">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                                    </svg>
+                                )}
+                           </div>
+                           <div className="flex flex-col">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase leading-tight">
+                                    {isAudio ? 'Style Reference' : 'Context'}
+                                </span>
+                                <span className="text-xs text-slate-300 truncate max-w-[120px]" title={file.name}>{file.name}</span>
+                           </div>
+                           <button 
+                              type="button" 
+                              onClick={() => removeFile(idx)}
+                              className="text-slate-500 hover:text-red-400 p-1 rounded-full hover:bg-slate-800 transition-colors"
+                           >
+                               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
+                                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                               </svg>
+                           </button>
+                       </div>
+                   );
+               })}
+               
                <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isLoading}
-                  className="flex items-center gap-2 text-sm text-slate-400 hover:text-purple-400 transition-colors px-2 py-1 rounded-lg hover:bg-slate-800/50 border border-transparent hover:border-slate-700"
+                  className="flex items-center gap-2 text-sm text-slate-400 hover:text-purple-400 transition-colors px-3 py-2 rounded-lg bg-slate-900/50 border border-slate-700/50 hover:border-purple-500/50"
                >
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                   </svg>
-                  <span>Add Context (Image, Text, PDF)</span>
+                  <span className="text-xs font-bold uppercase tracking-wide">Add Files</span>
                </button>
-           ) : (
-               <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg p-2 max-w-max animate-in fade-in slide-in-from-left-2">
-                   <div className="bg-purple-900/50 p-1.5 rounded-md">
-                        {selectedFile.mimeType.startsWith('image') ? (
-                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-purple-300">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-                             </svg>
-                        ) : (
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-purple-300">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                            </svg>
-                        )}
-                   </div>
-                   <span className="text-xs text-slate-300 truncate max-w-[200px]" title={selectedFile.name}>{selectedFile.name}</span>
-                   <button 
-                      type="button" 
-                      onClick={clearFile}
-                      className="text-slate-500 hover:text-red-400 p-1 rounded-full hover:bg-slate-800 transition-colors"
-                   >
-                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
-                           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                       </svg>
-                   </button>
-               </div>
-           )}
+           </div>
+           
+           <p className="text-[10px] text-slate-500">
+               Upload <strong>Audio</strong> for style/track reference, <strong>Images</strong> for vibe, or <strong>PDF/Text</strong> for lore.
+           </p>
         </div>
 
         <div className="relative group">
@@ -144,7 +170,6 @@ const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiK
             )}
             </button>
 
-            {/* Popup / Tooltip for Missing Key */}
             {!apiKeyValid && (
                 <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-4 w-72 p-4 bg-slate-800 border border-purple-500/30 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 text-center pointer-events-auto">
                     <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-slate-800 border-b border-r border-purple-500/30 rotate-45"></div>
