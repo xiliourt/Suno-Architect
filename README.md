@@ -1,8 +1,9 @@
 # Suno Architect - Auto Generate Suno Prompts
 - Uses Gemini Flash 2.5 or 3.0 flash (which supports free keys, see [https://aistudio.google.com/api-keys](https://aistudio.google.com/api-keys))
-# Featues
 
-## Generation
+## Featues
+
+### Generation
 - Generates
   - Song title
   - Suno style settings (weirdness %, style %, exclude, and male/female/none)
@@ -21,12 +22,12 @@
   - Image files to influence lyrics vibe
   - PDF or text files to influence lore (background)
  
-## LRC and SRT File Generation
+### LRC and SRT File Generation
 - Pulls JSON word-by-word lyrics from Suno API
 - Pulls lyics from Suno API
 - Times word-time lyrics line-by-line, exportable as SRT or LRC
 
-## Lyric Video Generation
+### Lyric Video Generation
 - Pulls JSON word-by-word lyrics from Suno API for highlighting active word
 - Pulls lyrics (prompt) from Suni API for line generation
 - Live preview available with various settings
