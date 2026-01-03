@@ -8,7 +8,6 @@ export const SUNO_MODEL_MAPPINGS = [
   { label: "V3.5", value: "chirp-v3-5" },
   { label: "V3", value: "chirp-v3-0" },
 ];
-
 export const DEFAULT_SUNO_LIBRARY: SunoLibrary = {
   genres: ["Pop", "K-Pop", "J-Pop", "Synth-pop", "Rock", "Hard Rock", "Alt Rock", "Indie Rock", "Prog Rock", "Punk", "Metal", "Hip-Hop", "Rap", "Trap", "R&B", "Soul", "Drill", "EDM", "House", "Techno", "Trance", "Dubstep", "DnB", "Ambient", "Synthwave", "Folk", "Country", "Jazz", "Blues", "Classical", "Reggae", "Latin"],
   structures: ["[Intro]", "[Verse]", "[Pre-Chorus]", "[Chorus]", "[Post-Chorus]", "[Bridge]", "[Outro]", "[Hook]", "[Instrumental Break]", "[Solo Section]", "[Guitar Solo]", "[Drop]", "[Build-up]", "[Spoken Word]"],
@@ -78,59 +77,54 @@ ${library.theory.join(", ")}
 ## 7. Reference Examples
 * **Psychedelic Rock:** Weirdness 60%, Style Influence 65%.
 * **Modern EDM:** Weirdness 40%, Style Influence 70%, Exclude: Acoustic.
-* **Indie Folk:** Weirdness 30%, Style Influence 50%, Exclude: Electronic.
+* **Indie Folk:** Weirdness 30%, Style Influence 50%, Exclude: Acoustic.
 `;
 };
 
 /**
  * STRICT_OUTPUT_SUFFIX
  * Enforces the exact output format required by the parser.
- * This is appended to every prompt automatically.
+ * Updated to handle instructions for multiple tracks.
  */
-export const STRICT_OUTPUT_SUFFIX = `
+export const GET_STRICT_OUTPUT_SUFFIX = (numTracks: number) => `
 *** CRITICAL RESPONSE FORMATTING RULES ***
-You must output your response in exactly **5 separate code blocks** and **1 plain text section**.
-Do not include conversational fillers.
-Do not put the Advanced Parameters inside a code block.
+You are generating exactly **${numTracks} tracks** for a cohesive album experience.
+For EACH track, you must output exactly **6 separate code blocks** in this order:
 
-**OUTPUT STRUCTURE (Follow Strictly):**
+--- TRACK [NUMBER] ---
+1. Style: Comma-separated tags.
+\`\`\`text
+Genre, Mood, BPM...
+\`\`\`
 
-1. **Style of Music (Code Block 1):** 
-   Comma-separated tags ONLY.
-   \`\`\`text
-   Genre, Mood, Vocal Style, BPM, Production
-   \`\`\`
+2. Title: Song title ONLY.
+\`\`\`text
+Song Title
+\`\`\`
 
-2. **Title (Code Block 2):** 
-   The song title ONLY.
-   \`\`\`text
-   Song Title
-   \`\`\`
+3. Exclude: Comma-separated tags to exclude.
+\`\`\`text
+None
+\`\`\`
 
-3. **Exclude Styles (Code Block 3):**
-   Comma-separated tags to exclude. Output "None" if empty.
-   \`\`\`text
-   Tag 1, Tag 2, Tag 3
-   \`\`\`
+4. Parameters: Advanced generation settings.
+\`\`\`text
+Vocal Gender: [Male|Female|None]
+Weirdness: [0-100]%
+Style Influence: [0-100]%
+\`\`\`
 
-4. **Advanced Parameters (PLAIN TEXT - NO CODE BLOCK):**
-   Write these as plain text lines immediately after the Exclude block.
-   * Vocal Gender: [Male|Female|None]
-   * Weirdness: [0-100]%
-   * Style Influence: [0-100]%
+5. Lyrics: Full lyrics with embedded square-bracket tags \`[]\`.
+\`\`\`text
+[Intro]...
+\`\`\`
 
-5. **Lyrics with Meta Tags (Code Block 4):**
-   Full lyrics with embedded square-bracket tags \`[]\`.
-   \`\`\`text
-   [Intro]
-   ...
-   \`\`\`
+6. Clean: Lyrics ONLY (no tags).
+\`\`\`text
+Lyrics text...
+\`\`\`
 
-6. **Clean Lyrics (Code Block 5):**
-   Lyrics ONLY. No structural tags like [Verse] or [Chorus].
-   \`\`\`text
-   ...
-   \`\`\`
+Do not include any conversational text between tracks. Use the exact "--- TRACK [N] ---" header before each track set.
 `;
 
 /**
@@ -150,7 +144,7 @@ ${knowledgeBase}
 
 **Guidelines:**
 * Ensure tags in Block 1 are relevant to Suno (Genre, BPM, Mood).
-* Block 4 (Lyrics with Tags) must have tags *before* the lines.
+* If generating an album, ensure thematic consistency across tracks while varying tempos and keys.
 * If the user provides context, adapt the tone accordingly.
 * Do not use [cite] tags.
 `;

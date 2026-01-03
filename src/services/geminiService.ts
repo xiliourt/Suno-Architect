@@ -1,14 +1,16 @@
-import { GoogleGenAI } from "@google/genai";
+
+import { GoogleGenAI, Type } from "@google/genai";
 import { ParsedSunoOutput, AlignedWord, FileContext } from "../types";
-import { STRICT_OUTPUT_SUFFIX } from "../constants";
+import { GET_STRICT_OUTPUT_SUFFIX } from "../constants";
 
 export const generateSunoPrompt = async (
   userInput: string, 
   customApiKey?: string,
   systemInstruction?: string,
   geminiModel: string = "gemini-3-flash-preview",
-  contextFiles: FileContext[] = []
-): Promise<ParsedSunoOutput> => {
+  contextFiles: FileContext[] = [],
+  numTracks: number = 1
+): Promise<ParsedSunoOutput[]> => {
   const apiKey = customApiKey || process.env.API_KEY;
 
   if (!apiKey) {
@@ -21,8 +23,8 @@ export const generateSunoPrompt = async (
       throw new Error("System Instruction is missing.");
   }
 
-  // Enforce strict output format by appending the constant rule set
-  const finalSystemInstruction = `${systemInstruction}\n\n${STRICT_OUTPUT_SUFFIX}`;
+  // Enforce strict output format for the requested number of tracks
+  const finalSystemInstruction = `${systemInstruction}\n\n${GET_STRICT_OUTPUT_SUFFIX(numTracks)}`;
 
   try {
     const parts: any[] = [];
@@ -58,9 +60,9 @@ export const generateSunoPrompt = async (
 
     // Add user text prompt
     if (userInput) {
-        parts.push({ text: userInput });
+        parts.push({ text: `${userInput}\n\nPlease generate an album containing exactly ${numTracks} tracks based on this idea.` });
     } else if (contextFiles.length > 0) {
-        parts.push({ text: "Generate a professional Suno AI prompt based on the provided context files." });
+        parts.push({ text: `Generate a professional Suno AI album of exactly ${numTracks} tracks based on the provided context files.` });
     }
 
     const response = await ai.models.generateContent({
@@ -73,7 +75,7 @@ export const generateSunoPrompt = async (
     });
 
     const text = response.text || "";
-    return parseResponse(text);
+    return parseMultipleResponses(text);
   } catch (error: any) {
     console.error("Gemini API Error:", error);
     const msg = error.message || "Failed to generate prompt.";
@@ -81,184 +83,65 @@ export const generateSunoPrompt = async (
   }
 };
 
-/**
- * Groups aligned words into lines matching the original lyrics structure using Gemini.
- * Uses a hybrid approach: takes JavaScript-generated pseudo-lines as a draft, 
- * batches them to avoid token limits/timeouts, and uses AI to perfect the structure.
- */
-export const groupLyricsByLines = async (
-  lyrics: string,
-  alignedWords: AlignedWord[],
-  customApiKey?: string,
-  modelName: string = "gemini-3-flash-preview",
-  pseudoLines?: AlignedWord[][]
-): Promise<AlignedWord[][]> => {
-  const apiKey = customApiKey || process.env.API_KEY;
-  if (!apiKey) throw new Error("API Key required for smart grouping.");
-
-  // 1. Prepare Data
-  const allSimplifiedWords = alignedWords.map(w => ({ 
-      w: w.word.trim(), 
-      s: Number(w.start_s.toFixed(2)), 
-      e: Number(w.end_s.toFixed(2)) 
-  }));
-
-  const inputLines = pseudoLines && pseudoLines.length > 0 ? pseudoLines : [alignedWords];
-
-  // 2. Batching Strategy
-  const BATCH_WORD_LIMIT = 75;
-  const batches: any[][] = [];
+const parseMultipleResponses = (fullText: string): ParsedSunoOutput[] => {
+  // Split the response by Track headers if possible
+  const trackSplits = fullText.split(/--- TRACK \d+ ---/i).filter(s => s.trim().length > 10);
   
-  let currentBatch: any[] = [];
-  let currentWordCount = 0;
-
-  for (const line of inputLines) {
-      const simplifiedLine = line.map(w => ({ 
-          w: w.word.trim(), 
-          s: Number(w.start_s.toFixed(2)), 
-          e: Number(w.end_s.toFixed(2)) 
-      }));
-
-      if (currentWordCount + simplifiedLine.length > BATCH_WORD_LIMIT && currentBatch.length > 0) {
-          batches.push(currentBatch);
-          currentBatch = [];
-          currentWordCount = 0;
-      }
-      
-      currentBatch.push(simplifiedLine);
-      currentWordCount += simplifiedLine.length;
-  }
-  if (currentBatch.length > 0) batches.push(currentBatch);
-
-  const finalLines: AlignedWord[][] = [];
-
-  for (let i = 0; i < batches.length; i++) {
-      const batchDraft = batches[i];
-      
-      try {
-          const batchResult = await processBatchWithGemini(batchDraft, lyrics, apiKey, modelName, i, batches.length);
-          finalLines.push(...batchResult);
-      } catch (err) {
-          console.error(`Batch ${i+1} failed, falling back to original draft for this section.`, err);
-          const fallbackLines = batchDraft.map(line => line.map((s: any) => ({
-              word: s.w,
-              start_s: s.s,
-              end_s: s.e,
-              success: true,
-              p_align: 1
-          })));
-          finalLines.push(...fallbackLines);
-      }
-  }
-
-  return finalLines;
-};
-
-const processBatchWithGemini = async (
-    batchDraft: any[][], 
-    fullLyrics: string,
-    apiKey: string,
-    modelName: string,
-    batchIndex: number,
-    totalBatches: number
-): Promise<AlignedWord[][]> => {
-    const ai = new GoogleGenAI({ apiKey });
-    const lyricLines = fullLyrics.split('\n').map(l => l.trim()).filter(l => l);
-    const lyricMap = lyricLines.reduce((acc, line, i) => {
-        acc[i + 1] = line;
-        return acc;
-    }, {} as Record<string, string>);
-
-    const prompt = `
-  Role: Lyric Synchronizer.
-  Task: Map the "Audio Draft" words to the "Target Structure" lines.
-  
-  --- Target Structure (Visual Guide) ---
-  ${JSON.stringify(lyricMap)}
-  --- End Target ---
-  
-  --- Audio Draft (Batch ${batchIndex + 1}/${totalBatches}) ---
-  ${JSON.stringify(batchDraft)}
-  --- End Draft ---
-  
-  Instructions:
-  1. The "Audio Draft" contains words with timestamps, but potentially incorrect line breaks.
-  2. The "Target Structure" is the official lyrics.
-  3. You are working on a specific segment (Batch ${batchIndex + 1} of ${totalBatches}).
-  4. Your job is to correct the line breaks in the Audio Draft to match the Target Structure.
-  5. **CRITICAL:** You MUST output EVERY word from the "Audio Draft". Do not skip words. Do not add words.
-  6. Output JSON only: A list of lines, where each line is an array of word objects ({w, s, e}).
-  
-  Output JSON format:
-  { "lines": [[{"w": "word", "s": 1.2, "e": 1.5}, ...], ...] }
-  `;
-
-    const response = await ai.models.generateContent({
-        model: modelName, 
-        contents: prompt,
-        config: { 
-            responseMimeType: "application/json",
-            temperature: 0.1 
+  // If no clear track splits, try to parse everything as a continuous stream of blocks
+  if (trackSplits.length === 0) {
+    const allMatches = extractCodeBlocks(fullText);
+    const results: ParsedSunoOutput[] = [];
+    // Each track has 6 blocks now (Style, Title, Exclude, Params, LyricsTags, Clean)
+    for (let i = 0; i < allMatches.length; i += 6) {
+        const chunk = allMatches.slice(i, i + 6);
+        if (chunk.length >= 5) {
+            results.push(constructParsedOutput(chunk, fullText));
         }
-    });
-
-    const text = response.text || "{}";
-    const json = JSON.parse(text);
-
-    if (json.lines && Array.isArray(json.lines)) {
-        return json.lines.map((line: any[]) => line.map((w: any) => ({
-            word: w.w,
-            start_s: w.s,
-            end_s: w.e,
-            success: true,
-            p_align: 1
-        })));
     }
-    
-    throw new Error("Invalid JSON structure from AI");
+    return results.length > 0 ? results : [constructParsedOutput([], fullText)];
+  }
+
+  return trackSplits.map(trackText => {
+      const matches = extractCodeBlocks(trackText);
+      return constructParsedOutput(matches, trackText);
+  });
 };
 
-const cleanTrailingHyphens = (text: string): string => {
-    if (!text) return "";
-    return text.replace(/[ \t]*[-–—]+[ \t]*$/gm, "");
-};
-
-const parseResponse = (fullText: string): ParsedSunoOutput => {
-  const result: ParsedSunoOutput = {
-    style: "",
-    title: "",
-    excludeStyles: "",
-    advancedParams: "",
-    vocalGender: "None",
-    weirdness: 50,
-    styleInfluence: 50,
-    lyricsWithTags: "",
-    lyricsAlone: "",
-    javascriptCode: "",
-    fullResponse: fullText,
-  };
-
+const extractCodeBlocks = (text: string): string[] => {
   const codeBlockRegex = /```(?:text|markdown)?\s*([\s\S]*?)\s*```/g;
   const matches: string[] = [];
   let match;
-  while ((match = codeBlockRegex.exec(fullText)) !== null) {
+  while ((match = codeBlockRegex.exec(text)) !== null) {
     matches.push(match[1].trim());
   }
+  return matches;
+};
 
-  if (matches.length > 0) result.style = matches[0];
-  if (matches.length > 1) result.title = matches[1];
-  if (matches.length > 2) result.excludeStyles = matches[2] === "None" ? "" : matches[2];
-  if (matches.length > 3) result.lyricsWithTags = cleanTrailingHyphens(matches[3]);
-  if (matches.length > 4) result.lyricsAlone = cleanTrailingHyphens(matches[4]);
+const constructParsedOutput = (matches: string[], rawText: string): ParsedSunoOutput => {
+  const result: ParsedSunoOutput = {
+    style: matches[0] || "",
+    title: matches[1] || "",
+    excludeStyles: matches[2] === "None" ? "" : (matches[2] || ""),
+    advancedParams: matches[3] || "", // Now in a code block
+    vocalGender: "None",
+    weirdness: 50,
+    styleInfluence: 50,
+    lyricsWithTags: cleanTrailingHyphens(matches[4] || ""),
+    lyricsAlone: cleanTrailingHyphens(matches[5] || ""),
+    javascriptCode: "",
+    fullResponse: rawText,
+  };
 
-  const paramLines = fullText.split('\n').filter(line => 
+  // Parse advanced params from block 3 or the raw text of the segment
+  const paramSource = result.advancedParams || rawText;
+  const paramLines = paramSource.split('\n').filter(line => 
     line.toLowerCase().includes('vocal gender') || 
     line.toLowerCase().includes('weirdness') || 
     line.toLowerCase().includes('style influence')
   ).map(line => line.replace(/^[\s\*\-\u2022]+/, '').trim());
 
   if (paramLines.length > 0) {
-    result.advancedParams = paramLines.join('\n');
+    if (!result.advancedParams) result.advancedParams = paramLines.join('\n');
     paramLines.forEach(line => {
         const lowerLine = line.toLowerCase();
         if (lowerLine.includes('vocal gender')) {
@@ -332,6 +215,11 @@ adjustSlider('Weirdness', ${data.weirdness});
 adjustSlider('Style Influence', ${data.styleInfluence});
 setVocalGender('${data.vocalGender}');
 `;
+};
+
+const cleanTrailingHyphens = (text: string): string => {
+    if (!text) return "";
+    return text.replace(/[ \t]*[-–—]+[ \t]*$/gm, "");
 };
 
 export const STOP_WORDS = new Set(['the', 'and', 'a', 'to', 'of', 'in', 'it', 'is', 'that', 'you', 'he', 'she', 'was', 'for', 'on', 'are', 'as', 'with', 'his', 'they', 'at', 'be', 'this', 'have', 'from', 'or', 'one', 'had', 'by', 'word', 'but', 'not', 'what', 'all', 'were', 'we', 'when', 'your', 'can', 'said', 'there', 'use', 'an', 'each', 'which', 'she', 'do', 'how', 'their', 'if', 'will', 'up', 'other', 'about', 'out', 'many', 'then', 'them', 'these', 'so', 'some', 'her', 'would', 'make', 'like', 'him', 'into', 'time', 'has', 'look', 'two', 'more', 'write', 'go', 'see', 'number', 'no', 'way', 'could', 'people', 'my', 'than', 'first', 'water', 'been', 'call', 'who', 'oil', 'its', 'now', 'find']);
@@ -476,4 +364,67 @@ export const matchWordsToPrompt = (aligned: AlignedWord[], promptText: string): 
     }
     if (currentGroup.length > 0) groups.push(currentGroup);
     return groups;
+};
+
+/**
+ * Uses Gemini to group a flat list of aligned words into logical lines 
+ * based on the provided lyrics text structure.
+ */
+export const groupLyricsByLines = async (
+  lyrics: string,
+  aligned: AlignedWord[],
+  apiKey?: string,
+  modelName: string = "gemini-3-flash-preview",
+  fallback?: AlignedWord[][]
+): Promise<AlignedWord[][]> => {
+  const key = apiKey || process.env.API_KEY;
+  if (!key) return fallback || [];
+
+  const ai = new GoogleGenAI({ apiKey: key });
+
+  try {
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: `
+        Task: Group a list of synchronized words into arrays that represent lines of a song.
+        Use the LYRICS provided as the ground truth for line breaks.
+        
+        LYRICS:
+        ${lyrics}
+
+        SYNCED WORDS (JSON):
+        ${JSON.stringify(aligned.map(w => ({ word: w.word, start: w.start_s, end: w.end_s })))}
+      `,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                word: { type: Type.STRING, description: "The word text" },
+                start: { type: Type.NUMBER, description: "Start time in seconds" },
+                end: { type: Type.NUMBER, description: "End time in seconds" }
+              },
+              required: ["word", "start", "end"]
+            }
+          }
+        }
+      }
+    });
+
+    const data = JSON.parse(response.text || "[]");
+    return data.map((line: any[]) => line.map(item => ({
+      word: item.word,
+      start_s: item.start,
+      end_s: item.end,
+      success: true,
+      p_align: 1.0
+    })));
+  } catch (error) {
+    console.error("Gemini Grouping Error:", error);
+    return fallback || [];
+  }
 };

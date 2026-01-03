@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import InputSection from './components/InputSection';
 import OutputSection from './components/OutputSection';
@@ -132,7 +131,6 @@ const App: React.FC = () => {
             });
 
             setHistory(prevHistory => {
-                // Fix: Explicitly type the Map to ensure 'existing' is correctly typed as SunoClip
                 const existingMap = new Map<string, SunoClip>(prevHistory.map(item => [item.id, item]));
                 
                 newClips.forEach(newClip => {
@@ -154,7 +152,6 @@ const App: React.FC = () => {
                     }
                 });
 
-                // Fix: Explicitly type the sort parameters to resolve 'unknown' property access
                 const merged = Array.from(existingMap.values()).sort((a: SunoClip, b: SunoClip) => 
                     new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
                 );
@@ -213,7 +210,6 @@ const App: React.FC = () => {
 
             setHistory(prev => {
                 const nonDrafts = prev.filter(p => !p.id.startsWith('draft_'));
-                // Fix: Explicitly type the Map to ensure 'existing' is correctly typed as SunoClip
                 const map = new Map<string, SunoClip>(nonDrafts.map(c => [c.id, c]));
 
                 newClips.forEach(newClip => {
@@ -234,7 +230,6 @@ const App: React.FC = () => {
                     }
                 });
 
-                // Fix: Explicitly type the sort parameters to resolve 'unknown' property access
                 return Array.from(map.values()).sort((a: SunoClip, b: SunoClip) => 
                     new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
                 );
@@ -302,22 +297,24 @@ const App: React.FC = () => {
     }
   };
 
-  const handleGenerate = async (prompt: string, files: FileContext[] = []) => {
+  const handleGenerate = async (prompt: string, files: FileContext[] = [], numTracks: number = 1) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null, result: null }));
     try {
-      const result = await generateSunoPrompt(
+      const results = await generateSunoPrompt(
           prompt, 
           customApiKey, 
           promptSettings.customSystemPrompt, 
           geminiModel, 
-          files
+          files,
+          numTracks
       );
       
-      setState({ isLoading: false, error: null, result });
+      setState({ isLoading: false, error: null, result: results });
       
-      const draftClip: SunoClip = {
-          id: `draft_${Date.now()}`,
-          title: result.title || 'Untitled Prompt',
+      // Save all as drafts
+      const draftClips: SunoClip[] = results.map((result, idx) => ({
+          id: `draft_${Date.now()}_${idx}`,
+          title: result.title || `Untitled Track ${idx + 1}`,
           created_at: new Date().toISOString(),
           model_name: 'Gemini Draft',
           metadata: {
@@ -325,8 +322,8 @@ const App: React.FC = () => {
               prompt: result.lyricsWithTags || ''
           },
           originalData: result
-      };
-      setHistory(prev => [draftClip, ...prev]);
+      }));
+      setHistory(prev => [...draftClips, ...prev]);
 
     } catch (err: any) {
       setState({
@@ -371,13 +368,13 @@ const App: React.FC = () => {
           default:
               return (
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                    <div className="lg:col-span-5 space-y-6">
+                    <div className="lg:col-span-4 space-y-6">
                         <div className="sticky top-24">
                         <div className="mb-6">
-                            <h2 className="text-3xl font-bold text-white mb-2">Create Professional Songs</h2>
+                            <h2 className="text-3xl font-bold text-white mb-2">Architect Your Album</h2>
                             <p className="text-slate-400 text-sm leading-relaxed">
-                                Transform your raw ideas into structured, high-quality prompts optimized for Suno AI & Udio. 
-                                Includes meta tags, song structure, and production directives.
+                                Transform raw ideas into structured albums (up to 7 tracks). 
+                                Generates cohesive prompts with production directives for Suno & Udio.
                             </p>
                         </div>
                         <InputSection 
@@ -390,26 +387,12 @@ const App: React.FC = () => {
                             <strong>Error:</strong> {state.error}
                             </div>
                         )}
-                        <div className="mt-8 p-5 bg-slate-900/50 rounded-xl border border-slate-800">
-                            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Pro Tips</h3>
-                            <ul className="space-y-2 text-sm text-slate-400">
-                            <li className="flex items-start">
-                                <span className="text-purple-500 mr-2">•</span> Be specific about the genre (e.g., "Darkwave" vs "Electronic").
-                            </li>
-                            <li className="flex items-start">
-                                <span className="text-purple-500 mr-2">•</span> Upload an <strong>Audio Track</strong> to use as a style reference.
-                            </li>
-                            <li className="flex items-start">
-                                <span className="text-purple-500 mr-2">•</span> Use <strong>Images</strong> to inspire the theme and mood.
-                            </li>
-                            </ul>
-                        </div>
                         </div>
                     </div>
-                    <div className="lg:col-span-7">
+                    <div className="lg:col-span-8">
                         {state.result ? (
                         <OutputSection 
-                            data={state.result} 
+                            results={state.result} 
                             sunoCookie={sunoCookie}
                             sunoModel={sunoModel}
                             onSyncSuccess={handleSyncSuccess}
@@ -424,7 +407,7 @@ const App: React.FC = () => {
                                 </svg>
                                 </div>
                                 <p className="text-lg font-medium">Ready to Generate</p>
-                                <p className="text-sm mt-1">Your structured song prompts will appear here.</p>
+                                <p className="text-sm mt-1">Your structured album tracks will appear here.</p>
                             </>
                             )}
                             {state.isLoading && (

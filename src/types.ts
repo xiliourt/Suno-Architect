@@ -15,7 +15,7 @@ export interface ParsedSunoOutput {
 export interface GenerationState {
   isLoading: boolean;
   error: string | null;
-  result: ParsedSunoOutput | null;
+  result: ParsedSunoOutput[] | null;
 }
 
 export interface SunoClip {

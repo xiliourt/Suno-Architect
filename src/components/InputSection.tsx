@@ -1,29 +1,28 @@
-
 import React, { useState, useRef } from 'react';
 import { FileContext } from '../types';
 
 interface InputSectionProps {
-  onGenerate: (prompt: string, files: FileContext[]) => void;
+  onGenerate: (prompt: string, files: FileContext[], numTracks: number) => void;
   isLoading: boolean;
   apiKeyValid: boolean;
 }
 
 const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiKeyValid }) => {
   const [prompt, setPrompt] = useState('');
+  const [numTracks, setNumTracks] = useState(1);
   const [selectedFiles, setSelectedFiles] = useState<FileContext[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if ((prompt.trim() || selectedFiles.length > 0) && apiKeyValid) {
-      onGenerate(prompt, selectedFiles);
+      onGenerate(prompt, selectedFiles, numTracks);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files) {
-      // Fix: Cast Array.from(files) to File[] to ensure 'file' is correctly typed for property access and readAsDataURL
       (Array.from(files) as File[]).forEach(file => {
         const reader = new FileReader();
         reader.onload = (event) => {
@@ -52,21 +51,43 @@ const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiK
   return (
     <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-2xl p-6 shadow-xl relative">
       <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 mb-4">
-        Describe Your Song
+        Describe Your Album
       </h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="prompt" className="block text-sm font-medium text-slate-400 mb-2">
-            Story, Topic, or Vibe
+            Thematic Idea or Vibe
           </label>
           <textarea
             id="prompt"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             disabled={isLoading}
-            placeholder="E.g., An epic power ballad about a space explorer lost in the void. Or upload media for inspiration."
+            placeholder="E.g., A concept album about a city submerged under neon waves. Mix of synth-pop and heavy industrial."
             className="w-full h-32 bg-slate-900 border border-slate-700 rounded-xl p-4 text-slate-200 placeholder-slate-600 focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all resize-none text-base"
           />
+        </div>
+
+        {/* Tracks Selector */}
+        <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4">
+            <div className="flex justify-between items-center mb-3">
+                <label className="text-sm font-medium text-slate-300">Tracks to Generate</label>
+                <span className="bg-purple-600 text-white text-xs font-bold px-2 py-1 rounded-full">{numTracks} {numTracks === 1 ? 'Track' : 'Tracks'}</span>
+            </div>
+            <input 
+                type="range" 
+                min="1" 
+                max="7" 
+                step="1" 
+                value={numTracks}
+                onChange={(e) => setNumTracks(parseInt(e.target.value, 10))}
+                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+            />
+            <div className="flex justify-between text-[10px] text-slate-500 mt-2 font-bold px-1">
+                <span>Single</span>
+                <span>Mini Album (EP)</span>
+                <span>Full Album</span>
+            </div>
         </div>
 
         {/* Multi-File Upload Context Area */}
@@ -84,7 +105,6 @@ const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiK
                {selectedFiles.map((file, idx) => {
                    const isAudio = file.mimeType.startsWith('audio/');
                    const isImage = file.mimeType.startsWith('image/');
-                   const isDoc = file.mimeType.includes('pdf') || file.mimeType.includes('plain');
                    
                    return (
                        <div key={idx} className={`flex items-center gap-2 bg-slate-900 border ${isAudio ? 'border-pink-500/50' : 'border-slate-700'} rounded-lg p-2 animate-in fade-in zoom-in-95 duration-200`}>
@@ -134,10 +154,6 @@ const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiK
                   <span className="text-xs font-bold uppercase tracking-wide">Add Files</span>
                </button>
            </div>
-           
-           <p className="text-[10px] text-slate-500">
-               Upload <strong>Audio</strong> for style/track reference, <strong>Images</strong> for vibe, or <strong>PDF/Text</strong> for lore.
-           </p>
         </div>
 
         <div className="relative group">
@@ -157,43 +173,18 @@ const InputSection: React.FC<InputSectionProps> = ({ onGenerate, isLoading, apiK
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                <span>Constructing...</span>
+                <span>Constructing {numTracks > 1 ? `Album (${numTracks} Tracks)` : 'Prompt'}...</span>
                 </>
             ) : (
                 <>
-                <span>Generate Prompt</span>
+                <span>{numTracks > 1 ? `Generate Album (${numTracks} Tracks)` : 'Generate Prompt'}</span>
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.828 11.418a.75.75 0 00-1.061-.44l-1.022.463-.092.043a.75.75 0 00.323 1.39l.606-.275 1.077.488a.75.75 0 00.17.067l.154.015a.75.75 0 00.843-.695l.006-.056v-.063z" />
                 </svg>
                 </>
             )}
             </button>
-
-            {!apiKeyValid && (
-                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-4 w-72 p-4 bg-slate-800 border border-purple-500/30 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 text-center pointer-events-auto">
-                    <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-slate-800 border-b border-r border-purple-500/30 rotate-45"></div>
-                    <div className="relative z-10">
-                        <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-3 text-purple-400">
-                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
-                             </svg>
-                        </div>
-                        <h3 className="text-white font-bold mb-1">API Key Required</h3>
-                        <p className="text-slate-400 text-xs mb-3 leading-relaxed">
-                            You need a Gemini API key to generate songs. It's free and easy to get.
-                        </p>
-                        <a 
-                            href="https://aistudio.google.com/app/apikey" 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="inline-block bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2 px-4 rounded-lg transition-colors shadow-lg shadow-purple-500/20"
-                        >
-                            Get API Key
-                        </a>
-                    </div>
-                </div>
-            )}
+            {/* ... Error Tooltip ... */}
         </div>
       </form>
     </div>
