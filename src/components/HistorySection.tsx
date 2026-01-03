@@ -1,22 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { SunoClip, AlignedWord } from '../types';
+import { SunoClip, AlignedWord, ParsedSunoOutput } from '../types';
 import CopyButton from './CopyButton';
-import { getLyricAlignment, updateSunoMetadata } from '../services/sunoApi';
+import { getLyricAlignment, updateSunoMetadata, getSunoClip } from '../services/sunoApi';
 import { matchWordsToPrompt, stripMetaTags } from '../services/geminiService';
 
 interface HistorySectionProps {
   history: SunoClip[];
   onUpdateClip: (id: string, updates: Partial<SunoClip>) => void;
+  onAddClip: (clip: SunoClip) => void;
   sunoCookie?: string;
   onResync: () => void;
   isSyncing: boolean;
 }
 
-const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, sunoCookie, onResync, isSyncing }) => {
+const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, onAddClip, sunoCookie, onResync, isSyncing }) => {
   const [selectedClip, setSelectedClip] = useState<SunoClip | null>(null);
   const [manualIdInput, setManualIdInput] = useState('');
   const [editedLyrics, setEditedLyrics] = useState('');
   
+  // Toolbar state
+  const [topManualId, setTopManualId] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+
   // Loading States
   const [loadingAlignment, setLoadingAlignment] = useState(false);
   const [alignmentError, setAlignmentError] = useState<string | null>(null);
@@ -88,6 +93,68 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
     // Update local state to reflect change immediately in modal
     setSelectedClip(prev => prev ? ({ ...prev, id: newId }) : null);
     setManualIdInput('');
+  };
+
+  const handleImportByUuid = async () => {
+      if (!topManualId.trim()) return;
+      const id = topManualId.trim();
+      
+      if (history.some(c => c.id === id)) {
+          alert("This song is already in your library.");
+          return;
+      }
+
+      setIsImporting(true);
+      try {
+          let fetched: any = null;
+          if (sunoCookie) {
+              try {
+                  fetched = await getSunoClip(id, sunoCookie);
+              } catch (e) {
+                  console.warn("Failed to fetch clip metadata, adding generic entry", e);
+              }
+          }
+
+          const newClip: SunoClip = fetched ? {
+              id: fetched.id,
+              title: fetched.title || 'Imported Song',
+              created_at: fetched.created_at || new Date().toISOString(),
+              model_name: fetched.model_name || 'Imported',
+              imageUrl: fetched.image_url,
+              imageLargeUrl: fetched.image_large_url,
+              metadata: {
+                  tags: fetched.metadata?.tags || '',
+                  prompt: fetched.metadata?.prompt || ''
+              },
+              originalData: {
+                  style: fetched.metadata?.tags || '',
+                  title: fetched.title || '',
+                  excludeStyles: fetched.metadata?.negative_tags || '',
+                  advancedParams: '',
+                  vocalGender: '',
+                  weirdness: 50,
+                  styleInfluence: 50,
+                  lyricsWithTags: fetched.metadata?.prompt || '',
+                  lyricsAlone: (fetched.metadata?.prompt || '').replace(/\[[\s\S]*?\]/g, "").trim(),
+                  javascriptCode: '',
+                  fullResponse: ''
+              }
+          } : {
+              id: id,
+              title: 'Song ' + id.substring(0, 4),
+              created_at: new Date().toISOString(),
+              model_name: 'Manual Import',
+              metadata: { tags: '', prompt: '' }
+          };
+
+          onAddClip(newClip);
+          setTopManualId('');
+      } catch (err) {
+          console.error(err);
+          alert("Failed to import clip. Check the UUID.");
+      } finally {
+          setIsImporting(false);
+      }
   };
 
   const handleSaveLyrics = () => {
@@ -265,7 +332,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
       
       {/* History Toolbar */}
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 backdrop-blur-sm shadow-sm">
-           <div>
+           <div className="w-full sm:w-auto">
                <h2 className="text-lg font-bold text-white flex items-center gap-2">
                    Your Library
                    {history.length > 0 && <span className="text-xs font-normal text-slate-400">({history.length} items)</span>}
@@ -273,30 +340,50 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
                <p className="text-xs text-slate-400">Manage your generated prompts and Suno generations.</p>
            </div>
            
-           <button
-             onClick={onResync}
-             disabled={isSyncing}
-             className={`px-4 py-2 rounded-lg text-xs font-bold transition-all border flex items-center gap-2 shadow-lg
-             ${isSyncing 
-                ? 'bg-slate-700/50 text-slate-400 border-slate-600 cursor-wait' 
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600 hover:border-slate-500 hover:text-white'}`}
-             title="Clears local drafts and fetches the last 20 clips from Suno"
-           >
-              {isSyncing ? (
-                 <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                 </svg>
-              ) : (
-                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                    <path d="M3 3v5h5" />
-                    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-                    <path d="M16 16h5v5" />
-                 </svg>
-              )}
-              <span>Resync & Clear Drafts</span>
-           </button>
+           <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+                {/* Manual Import Box */}
+                <div className="flex bg-slate-900 border border-slate-700 rounded-lg overflow-hidden focus-within:ring-1 focus-within:ring-purple-500 transition-all">
+                    <input 
+                        type="text"
+                        value={topManualId}
+                        onChange={(e) => setTopManualId(e.target.value)}
+                        placeholder="Song UUID..."
+                        className="bg-transparent px-3 py-1.5 text-xs text-white outline-none w-32 md:w-48"
+                    />
+                    <button
+                        onClick={handleImportByUuid}
+                        disabled={isImporting || !topManualId.trim()}
+                        className="bg-slate-700 hover:bg-purple-600 disabled:bg-slate-800 text-white text-[10px] font-bold px-3 transition-colors border-l border-slate-700 uppercase"
+                    >
+                        {isImporting ? '...' : 'Import'}
+                    </button>
+                </div>
+
+                <button
+                    onClick={onResync}
+                    disabled={isSyncing}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all border flex items-center gap-2 shadow-lg
+                    ${isSyncing 
+                        ? 'bg-slate-700/50 text-slate-400 border-slate-600 cursor-wait' 
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600 hover:border-slate-500 hover:text-white'}`}
+                    title="Clears local drafts and fetches the last 20 clips from Suno"
+                >
+                    {isSyncing ? (
+                        <svg className="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                            <path d="M3 3v5h5" />
+                            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                            <path d="M16 16h5v5" />
+                        </svg>
+                    )}
+                    <span>Resync</span>
+                </button>
+           </div>
       </div>
 
       {history.length === 0 ? (
