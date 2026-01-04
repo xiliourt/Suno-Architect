@@ -147,13 +147,6 @@ ${knowledgeBase}
 * If generating an album, ensure thematic consistency across tracks while varying tempos and keys.
 * If the user provides context, adapt the tone accordingly.
 * Do not use [cite] tags.
-
-**NEGATIVE CONSTRAINTS (THE "VOID" LIST)**
-Do NOT use the following, as they trigger "AI-detection" in listeners:
-- **Forbidden Words:** ${constraints.forbidden.join(", ")}
-- **Forbidden Adjectives:** ${constraints.forbiddenAdjectives.join(", ")}
-- **Forbidden Phrases:** ${constraints.forbiddenPhrases.join(", ")}
-- **Forbidden Rhymes:** ${constraints.forbiddenRhymes}
 `;
 
 /**
