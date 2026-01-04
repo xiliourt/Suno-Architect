@@ -92,12 +92,15 @@ const OutputSection: React.FC<OutputSectionProps> = ({ results, sunoCookie, suno
       )}
 
       {results.map((data, index) => {
-          // Provide a complete default status to fix Property '...' does not exist on type '{}' errors.
           const status = syncStatuses[index] || { loading: false, success: false, error: undefined };
-          const gridCols = [data.title, data.style, data.excludeStyles].filter(Boolean).length;
-          const gridClass = gridCols === 3 
-            ? "grid grid-cols-1 md:grid-cols-3 gap-4" 
-            : "grid grid-cols-1 md:grid-cols-2 gap-4";
+          
+          // Determine grid items to calculate layout
+          const metaItemsCount = [data.title, data.style, data.excludeStyles, data.advancedParams].filter(Boolean).length;
+          const gridClass = metaItemsCount >= 4 
+            ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4" 
+            : metaItemsCount >= 3
+                ? "grid grid-cols-1 md:grid-cols-3 gap-4"
+                : "grid grid-cols-1 md:grid-cols-2 gap-4";
 
           return (
             <div key={index} className="space-y-6 relative pb-12 border-b border-slate-800 last:border-0 last:pb-0">
@@ -116,7 +119,7 @@ const OutputSection: React.FC<OutputSectionProps> = ({ results, sunoCookie, suno
                                 <h3 className="text-sm font-semibold text-emerald-300 uppercase tracking-wider">Title</h3>
                                 <CopyButton text={data.title} label="Copy" />
                             </div>
-                            <div className="p-4 bg-slate-900/30 flex-grow">
+                            <div className="p-4 bg-slate-900/30 flex-grow flex items-center justify-center">
                                 <p className="font-mono text-lg font-bold text-white text-center whitespace-pre-wrap break-words">{data.title}</p>
                             </div>
                         </div>
@@ -129,6 +132,28 @@ const OutputSection: React.FC<OutputSectionProps> = ({ results, sunoCookie, suno
                             </div>
                             <div className="p-4 bg-slate-900/30 flex-grow">
                                 <pre className="whitespace-pre-wrap font-mono text-sm text-slate-300 w-full break-words">{data.style}</pre>
+                            </div>
+                        </div>
+                    )}
+                    {data.excludeStyles && (
+                        <div className="bg-slate-800/80 border border-slate-700 rounded-xl overflow-hidden shadow-lg flex flex-col">
+                            <div className="bg-slate-900/50 px-4 py-3 border-b border-slate-700 flex justify-between items-center shrink-0">
+                                <h3 className="text-sm font-semibold text-red-300 uppercase tracking-wider">Negative</h3>
+                                <CopyButton text={data.excludeStyles} label="Copy" />
+                            </div>
+                            <div className="p-4 bg-slate-900/30 flex-grow">
+                                <pre className="whitespace-pre-wrap font-mono text-sm text-red-300/80 w-full break-words">{data.excludeStyles}</pre>
+                            </div>
+                        </div>
+                    )}
+                    {data.advancedParams && (
+                        <div className="bg-slate-800/80 border border-slate-700 rounded-xl overflow-hidden shadow-lg flex flex-col">
+                            <div className="bg-slate-900/50 px-4 py-3 border-b border-slate-700 flex justify-between items-center shrink-0">
+                                <h3 className="text-sm font-semibold text-blue-300 uppercase tracking-wider">Parameters</h3>
+                                <CopyButton text={data.advancedParams} label="Copy" />
+                            </div>
+                            <div className="p-4 bg-slate-900/30 flex-grow">
+                                <pre className="whitespace-pre-wrap font-mono text-sm text-blue-300/80 w-full break-words">{data.advancedParams}</pre>
                             </div>
                         </div>
                     )}
