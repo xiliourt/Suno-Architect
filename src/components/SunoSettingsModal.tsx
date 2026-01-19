@@ -198,11 +198,8 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
       }
   };
 
-  const tokenSnippet = `(function() {
-    const sessionCookie = document.cookie
-        .split('; ')
-        .find(row => row.startsWith('__session='))
-        ?.split('=')[1];
+  const tokenSnippet = `await (async function() {
+    const sessionCookie = await window.Clerk.session.getToken();
 
     if (sessionCookie) {
         console.log("%c Suno Session Token Found! ", "background: #222; color: #bada55; font-size: 14px;");
