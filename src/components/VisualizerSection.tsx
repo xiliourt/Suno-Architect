@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { SunoClip, AlignedWord } from '../types';
 import { getLyricAlignment, getSunoClip } from '../services/sunoApi';
@@ -377,7 +378,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         if (type === 'wave') {
             const sliceWidth = width / bufferLength;
             let x = 0;
-            // Position at bottom 15% (baseline)
             const baseline = height * 0.85;
             const scale = height * 0.15 * qt6Sensitivity;
 
@@ -396,78 +396,122 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         // Bars Logic (Frequency Domain)
         else if (type === 'bars') {
             const barCount = qt6BarCount;
-            // We usually have 1024 bins. We want to aggregate them into barCount.
-            // Ignore high frequencies (> 16kHz) which are usually empty/noise
-            const usefulBinLimit = Math.floor(bufferLength * 0.7); 
-            const step = Math.floor(usefulBinLimit / barCount);
+            // Trim high-end static noise. Typically 0-24kHz. 
+            // Music energy mostly < 12kHz.
+            // Ignore DC (index 0-2).
+            const startBin = 2;
+            const usefulLimit = Math.min(bufferLength, Math.floor(bufferLength * 0.6));
+            const range = usefulLimit - startBin;
+            const step = Math.max(1, Math.floor(range / barCount));
+            
             const barWidth = (width / barCount) * 0.8;
             const gap = (width / barCount) * 0.2;
             
             for(let i = 0; i < barCount; i++) {
                 let sum = 0;
+                let count = 0;
                 for(let j = 0; j < step; j++) {
-                    const idx = i * step + j;
-                    if(idx < bufferLength) {
+                    const idx = startBin + i * step + j;
+                    if(idx < usefulLimit) {
                         sum += (data[idx] as number);
+                        count++;
                     }
                 }
-                const avg = sum / step;
-                // Scale 0-255 to height
+                const avg = count > 0 ? sum / count : 0;
                 const val = (avg / 255.0) * qt6Sensitivity;
-                const barHeight = val * (height * 0.4);
+                // Add minimum height to avoid flicker on silence
+                const barHeight = Math.max(2, val * (height * 0.5));
                 
                 const x = i * (barWidth + gap) + (gap / 2);
                 const y = height * 0.95 - barHeight;
                 
-                // Rounded tops
-                ctx.roundRect(x, y, barWidth, barHeight, 4);
-                ctx.fill();
-                // Also reset path for next
                 ctx.beginPath();
+                if (ctx.roundRect) {
+                     ctx.roundRect(x, y, barWidth, barHeight, 4);
+                } else {
+                     ctx.rect(x, y, barWidth, barHeight);
+                }
+                ctx.fill();
             }
         }
         // Circle Logic (Frequency Domain)
         else if (type === 'circle') {
             const centerX = width / 2;
             const centerY = height / 2;
-            const radius = Math.min(width, height) * 0.25;
-            const barLenMax = Math.min(width, height) * 0.2;
+            // Base radius + modulation
+            const baseRadius = Math.min(width, height) * 0.20;
+            const maxExtrude = Math.min(width, height) * 0.25;
             
-            // Mirror bars around circle
-            const bars = 64; // Fixed reasonable count for circle
-            const step = Math.floor((bufferLength * 0.6) / bars);
-            const angleStep = (Math.PI * 2) / bars;
+            // Calculate bass energy for pulsing inner circle
+            let bassSum = 0;
+            for(let k=2; k<12; k++) bassSum += (data[k] as number);
+            const bassEnergy = (bassSum / 10 / 255.0) * qt6Sensitivity;
+            const currentRadius = baseRadius + (bassEnergy * 20);
 
-            for(let i = 0; i < bars; i++) {
+            // Mirror Spectrum: Lows at top, Highs at bottom
+            // Use 64 total bars (32 per side)
+            const totalBars = 64; 
+            const halfBars = totalBars / 2;
+            
+            // Limit to useful frequency range (~50% of bins)
+            const startBin = 2;
+            const usefulLimit = Math.floor(bufferLength * 0.5);
+            const step = Math.floor((usefulLimit - startBin) / halfBars);
+
+            ctx.lineCap = 'round';
+            ctx.lineWidth = 4;
+
+            for(let i = 0; i < halfBars; i++) {
                 let sum = 0;
-                for(let j = 0; j < step; j++) {
-                    sum += (data[i * step + j] as number);
+                for(let j=0; j<step; j++) {
+                     const idx = startBin + i*step + j;
+                     if(idx < usefulLimit) sum += (data[idx] as number);
                 }
-                const avg = sum / step;
+                const avg = sum/step;
                 const val = (avg / 255.0) * qt6Sensitivity;
-                const barH = Math.max(4, val * barLenMax);
-
-                const angle = i * angleStep - (Math.PI / 2); // Start top
                 
-                const x1 = centerX + Math.cos(angle) * radius;
-                const y1 = centerY + Math.sin(angle) * radius;
-                const x2 = centerX + Math.cos(angle) * (radius + barH);
-                const y2 = centerY + Math.sin(angle) * (radius + barH);
+                // Quadratic curve for punchier visuals
+                const barH = Math.max(4, Math.pow(val, 2) * maxExtrude);
 
-                ctx.lineWidth = 4;
-                ctx.lineCap = 'round';
-                ctx.beginPath();
-                ctx.moveTo(x1, y1);
-                ctx.lineTo(x2, y2);
-                ctx.stroke();
+                // Angle step
+                const angleStep = Math.PI / halfBars;
+                const angleOffset = i * angleStep;
+
+                // Right Side (Top to Bottom)
+                // -PI/2 is top. 
+                const angleR = -Math.PI/2 + angleOffset;
+                
+                // Left Side (Top to Bottom)
+                const angleL = -Math.PI/2 - angleOffset;
+
+                drawRadialBar(ctx, centerX, centerY, currentRadius, barH, angleR);
+                // Don't double draw top/bottom center perfectly to avoid artifacts, or do it for symmetry
+                if (i > 0) {
+                    drawRadialBar(ctx, centerX, centerY, currentRadius, barH, angleL);
+                }
             }
             
             // Inner Glow Circle
             ctx.beginPath();
-            ctx.arc(centerX, centerY, radius - 5, 0, Math.PI * 2);
-            ctx.fillStyle = hexToRgba(activeColor, 0.1);
+            ctx.arc(centerX, centerY, currentRadius - 5, 0, Math.PI * 2);
+            ctx.fillStyle = hexToRgba(activeColor, 0.1 + (bassEnergy * 0.2));
             ctx.fill();
+            ctx.strokeStyle = hexToRgba(activeColor, 0.5);
+            ctx.lineWidth = 2;
+            ctx.stroke();
         }
+  };
+
+  const drawRadialBar = (ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, h: number, angle: number) => {
+        const x1 = cx + Math.cos(angle) * r;
+        const y1 = cy + Math.sin(angle) * r;
+        const x2 = cx + Math.cos(angle) * (r + h);
+        const y2 = cy + Math.sin(angle) * (r + h);
+        
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
   };
 
   // --- DRAWING LOGIC ---
