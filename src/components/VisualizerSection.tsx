@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { SunoClip, AlignedWord } from '../types';
 import { getLyricAlignment, getSunoClip } from '../services/sunoApi';
