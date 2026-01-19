@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { SunoClip, AlignedWord } from '../types';
 import { getLyricAlignment, getSunoClip } from '../services/sunoApi';
@@ -63,6 +64,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   
   // Visual Settings
   const [aspectRatio, setAspectRatio] = useState<keyof typeof ASPECT_RATIOS>("16:9");
+  const [visualMode, setVisualMode] = useState<'cover' | 'qt6'>('cover');
   const [customBg, setCustomBg] = useState<{ url: string, type: 'image' | 'video', name: string } | null>(null);
   const [customAudio, setCustomAudio] = useState<{ url: string, name: string } | null>(null);
   const [audioBitrate, setAudioBitrate] = useState(192000);
@@ -89,6 +91,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const customVideoRef = useRef<HTMLVideoElement>(null);
   const requestRef = useRef<number | null>(null);
   
+  // Audio Context & Analysis Refs
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const dataArrayRef = useRef<Uint8Array | null>(null);
+
   // Smoothing Refs
   const smoothLineIdxRef = useRef(0);
   
@@ -101,7 +109,31 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   
-  const audioContextRef = useRef<AudioContext | null>(null);
+  // Setup Audio Analysis for Qt6 Visualizer
+  useEffect(() => {
+    if (visualMode === 'qt6' && audioRef.current && !sourceNodeRef.current) {
+        try {
+            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+            if (!AudioContextClass) return;
+
+            const ctx = new AudioContextClass();
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 2048;
+            analyser.smoothingTimeConstant = 0.8;
+            
+            const source = ctx.createMediaElementSource(audioRef.current);
+            source.connect(analyser);
+            analyser.connect(ctx.destination);
+            
+            audioContextRef.current = ctx;
+            analyserRef.current = analyser;
+            sourceNodeRef.current = source;
+            dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
+        } catch (e) {
+            console.error("Audio Context Init Failed:", e);
+        }
+    }
+  }, [visualMode]);
 
   // Handle Image Source Logic
   useEffect(() => {
@@ -255,6 +287,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         }
         
         setCustomBg({ url, type, name: file.name });
+        setVisualMode('cover'); // Switch to cover/custom mode
     }
   };
 
@@ -321,6 +354,10 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const togglePlay = () => {
       if (audioRef.current) {
           if (audioRef.current.paused) {
+              // Resume Audio Context if needed
+              if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+                  audioContextRef.current.resume();
+              }
               audioRef.current.play();
               setIsPlaying(true);
           } else {
@@ -371,35 +408,106 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         ctx.drawImage(img, startX, startY, drawW, drawH);
   };
 
+  const drawQt6Visualizer = (ctx: CanvasRenderingContext2D, width: number, height: number, data: Uint8Array | Float32Array) => {
+        const bufferLength = data.length;
+        const sliceWidth = width / bufferLength;
+        let x = 0;
+
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = activeColor;
+        ctx.beginPath();
+
+        const isFloat = data instanceof Float32Array;
+        
+        // Position at bottom 15% of screen (baseline)
+        const baseline = height * 0.85;
+        // Limit amplitude to avoid overlapping lyrics too much
+        const scale = height * 0.15;
+
+        for (let i = 0; i < bufferLength; i++) {
+            let v = 0;
+            if (isFloat) {
+                // Float32Array is -1.0 to 1.0
+                v = data[i] as number;
+            } else {
+                // Uint8Array is 0 to 255, 128 is silence
+                v = ((data[i] as number) - 128) / 128.0;
+            }
+
+            const y = baseline + (v * scale);
+
+            if (i === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+
+            x += sliceWidth;
+        }
+
+        ctx.stroke();
+  };
+
   // --- DRAWING LOGIC ---
-  const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number, overrideSmoothing?: number) => {
-      // 1. Draw Background
+  const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number, overrideSmoothing?: number, offlineAudioBuffer?: AudioBuffer) => {
+      // 1. Background Layer
       ctx.fillStyle = '#1e1e1e';
       ctx.fillRect(0, 0, width, height);
 
-      let drawn = false;
-      if (customBg) {
-          if (customBg.type === 'video' && customVideoRef.current) {
-              drawCover(ctx, customVideoRef.current, width, height);
-              drawn = true;
-          } else if (customBg.type === 'image') {
-              const customImg = document.getElementById('custom-bg-img') as HTMLImageElement;
-              if (customImg && customImg.complete) {
-                  drawCover(ctx, customImg, width, height);
+      if (visualMode === 'cover') {
+          let drawn = false;
+          if (customBg) {
+              if (customBg.type === 'video' && customVideoRef.current) {
+                  drawCover(ctx, customVideoRef.current, width, height);
                   drawn = true;
+              } else if (customBg.type === 'image') {
+                  const customImg = document.getElementById('custom-bg-img') as HTMLImageElement;
+                  if (customImg && customImg.complete) {
+                      drawCover(ctx, customImg, width, height);
+                      drawn = true;
+                  }
               }
           }
-      }
-      if (!drawn) {
-        const bgImg = document.getElementById('source-img') as HTMLImageElement;
-        if (bgImg && bgImg.complete) {
-            drawCover(ctx, bgImg, width, height);
-        }
-      }
+          if (!drawn) {
+            const bgImg = document.getElementById('source-img') as HTMLImageElement;
+            if (bgImg && bgImg.complete) {
+                drawCover(ctx, bgImg, width, height);
+            }
+          }
+          // Overlay Dimmer for Cover Art mode
+          ctx.fillStyle = 'rgba(0,0,0,0.7)';
+          ctx.fillRect(0, 0, width, height);
+      } else if (visualMode === 'qt6') {
+          // Qt6 Visualizer Background (Dark Gradient)
+          const grad = ctx.createLinearGradient(0, 0, 0, height);
+          grad.addColorStop(0, '#0f172a');
+          grad.addColorStop(1, '#000000');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, width, height);
 
-      // Overlay Dimmer
-      ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.fillRect(0, 0, width, height);
+          // Render Waveform
+          if (offlineAudioBuffer) {
+              // Offline extraction
+              const samples = 2048;
+              const sampleRate = offlineAudioBuffer.sampleRate;
+              const startSample = Math.floor(time * sampleRate);
+              const channelData = offlineAudioBuffer.getChannelData(0);
+              
+              // Safe slice
+              let slice: Float32Array;
+              if (startSample + samples < channelData.length) {
+                  slice = channelData.subarray(startSample, startSample + samples);
+              } else {
+                  slice = new Float32Array(samples); // Silence at end
+              }
+              drawQt6Visualizer(ctx, width, height, slice);
+
+          } else if (analyserRef.current && dataArrayRef.current) {
+              // Realtime extraction
+              analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
+              drawQt6Visualizer(ctx, width, height, dataArrayRef.current);
+          }
+      }
 
       // 2. Draw Text (Smooth Scroll)
       if (lines.length > 0) {
@@ -659,7 +767,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       return () => {
           if (requestRef.current) cancelAnimationFrame(requestRef.current);
       };
-  }, [selectedClipId, alignment, lines, isRendering, aspectRatio, customBg, activeColor, inactiveColor, fontFamily, smoothingFactor, inactiveOpacity, verticalOffset]);
+  }, [selectedClipId, alignment, lines, isRendering, aspectRatio, visualMode, customBg, activeColor, inactiveColor, fontFamily, smoothingFactor, inactiveOpacity, verticalOffset]);
 
   // --- OFFLINE RENDERING LOGIC ---
   const startOfflineRender = async () => {
@@ -775,7 +883,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
             const t = i / fps;
 
-            if (customBg?.type === 'video' && customVideoRef.current) {
+            if (visualMode === 'cover' && customBg?.type === 'video' && customVideoRef.current) {
                 const vid = customVideoRef.current;
                 const loopTime = t % vid.duration;
                 if (Math.abs(vid.currentTime - loopTime) > 0.001) {
@@ -790,7 +898,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 }
             }
 
-            renderFrame(ctx, targetWidth, targetHeight, t);
+            renderFrame(ctx, targetWidth, targetHeight, t, undefined, audioBuffer);
             
             // @ts-ignore
             const frame = new VideoFrame(canvasRef.current, { timestamp: t * 1000000 });
@@ -949,35 +1057,51 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                      <div className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 shadow-lg p-4 space-y-4">
                          {/* Cover Art */}
                          <div className="relative group rounded-lg overflow-hidden border border-slate-700/50">
-                             <img 
-                                id="source-img"
-                                src={imgSrc} 
-                                alt="Cover" 
-                                crossOrigin="anonymous" 
-                                onError={handleImageError}
-                                className={`w-full h-32 object-cover ${customBg ? 'opacity-50' : 'opacity-100'}`}
-                             />
-                             {customBg && (
-                                 <div className="absolute inset-0 flex items-center justify-center">
-                                      {customBg.type === 'video' ? (
-                                         <div className="bg-black/70 p-2 rounded-full">
-                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-white">
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5m-3.75-13.5H9m3 0h3.75M9 18.75H5.25m8.25 0h3.75" />
-                                            </svg>
-                                         </div>
-                                      ) : (
-                                          <img src={customBg.url} className="w-full h-full object-cover" alt="custom" />
-                                      )}
-                                      <button 
-                                        onClick={() => setCustomBg(null)}
-                                        className="absolute top-1 right-1 bg-red-600 text-white p-1 rounded-full shadow-lg hover:bg-red-500"
-                                        title="Remove Custom BG"
-                                      >
-                                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
-                                            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                                          </svg>
-                                      </button>
-                                 </div>
+                             {visualMode === 'cover' ? (
+                                <>
+                                    <img 
+                                        id="source-img"
+                                        src={imgSrc} 
+                                        alt="Cover" 
+                                        crossOrigin="anonymous" 
+                                        onError={handleImageError}
+                                        className={`w-full h-32 object-cover ${customBg ? 'opacity-50' : 'opacity-100'}`}
+                                    />
+                                    {customBg && (
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            {customBg.type === 'video' ? (
+                                                <div className="bg-black/70 p-2 rounded-full">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-white">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25v13.5m-7.5-13.5v13.5m-3.75-13.5H9m3 0h3.75M9 18.75H5.25m8.25 0h3.75" />
+                                                    </svg>
+                                                </div>
+                                            ) : (
+                                                <img src={customBg.url} className="w-full h-full object-cover" alt="custom" />
+                                            )}
+                                            <button 
+                                                onClick={() => setCustomBg(null)}
+                                                className="absolute top-1 right-1 bg-red-600 text-white p-1 rounded-full shadow-lg hover:bg-red-500"
+                                                title="Remove Custom BG"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
+                                                    <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    )}
+                                </>
+                             ) : (
+                                <div className="w-full h-32 bg-gradient-to-b from-slate-800 to-black flex items-center justify-center border-b border-slate-700">
+                                    <div className="text-center">
+                                        <div className="w-12 h-8 bg-purple-500/20 mx-auto mb-2 flex items-end justify-center gap-1 rounded overflow-hidden">
+                                            <div className="w-1 h-3 bg-purple-500 animate-pulse"></div>
+                                            <div className="w-1 h-5 bg-purple-500 animate-pulse delay-75"></div>
+                                            <div className="w-1 h-2 bg-purple-500 animate-pulse delay-150"></div>
+                                            <div className="w-1 h-4 bg-purple-500 animate-pulse delay-100"></div>
+                                        </div>
+                                        <span className="text-xs font-bold text-white uppercase tracking-wider">Qt6 Visualizer</span>
+                                    </div>
+                                </div>
                              )}
                              
                              {/* Hidden Custom Media Elements */}
@@ -1017,24 +1141,45 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                      </select>
                                  </div>
 
-                                 {/* Background File Upload */}
+                                 {/* Visual Mode Selector */}
                                  <div>
-                                     <label className="text-xs text-slate-500 block mb-1">Custom Background</label>
-                                     <label className="flex items-center justify-center w-full px-2 py-2 border border-dashed border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition-colors group bg-slate-900/50">
-                                         <input 
-                                            type="file" 
-                                            accept="image/png, image/jpeg, image/webp, video/mp4, video/webm" 
-                                            className="hidden" 
-                                            onChange={handleFileUpload}
-                                         />
-                                         <div className="flex items-center gap-2 text-slate-400 group-hover:text-white">
-                                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                                                 <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                                             </svg>
-                                             <span className="text-xs">Upload Image / Loop</span>
-                                         </div>
-                                     </label>
+                                     <label className="text-xs text-slate-500 block mb-1">Background Mode</label>
+                                     <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-700">
+                                         <button 
+                                            onClick={() => setVisualMode('cover')}
+                                            className={`flex-1 text-[10px] font-bold py-1.5 rounded transition-colors ${visualMode === 'cover' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
+                                         >
+                                             Cover / Custom
+                                         </button>
+                                         <button 
+                                            onClick={() => setVisualMode('qt6')}
+                                            className={`flex-1 text-[10px] font-bold py-1.5 rounded transition-colors ${visualMode === 'qt6' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
+                                         >
+                                             Qt6 Visualizer
+                                         </button>
+                                     </div>
                                  </div>
+
+                                 {/* Background File Upload */}
+                                 {visualMode === 'cover' && (
+                                     <div>
+                                         <label className="text-xs text-slate-500 block mb-1">Custom Media</label>
+                                         <label className="flex items-center justify-center w-full px-2 py-2 border border-dashed border-slate-600 rounded cursor-pointer hover:bg-slate-800 transition-colors group bg-slate-900/50">
+                                             <input 
+                                                type="file" 
+                                                accept="image/png, image/jpeg, image/webp, video/mp4, video/webm" 
+                                                className="hidden" 
+                                                onChange={handleFileUpload}
+                                             />
+                                             <div className="flex items-center gap-2 text-slate-400 group-hover:text-white">
+                                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                                     <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                                                 </svg>
+                                                 <span className="text-xs">Upload Image / Loop</span>
+                                             </div>
+                                         </label>
+                                     </div>
+                                 )}
 
                                  {/* Audio File Upload */}
                                  <div>
