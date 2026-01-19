@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { SunoClip, AlignedWord } from '../types';
 import { getLyricAlignment, getSunoClip } from '../services/sunoApi';
@@ -57,6 +58,8 @@ const FONTS = [
     { label: "Courier Prime (Mono)", value: "'Courier Prime', monospace" },
 ];
 
+type Qt6Style = 'wave' | 'bars' | 'circle';
+
 const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCookie, onUpdateClip, apiKey, geminiModel }) => {
   // Selection State
   const [selectedClipId, setSelectedClipId] = useState<string>('');
@@ -75,14 +78,19 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const [inactiveColor, setInactiveColor] = useState('#ffffff');
   const [inactiveOpacity, setInactiveOpacity] = useState(0.3);
   const [fontFamily, setFontFamily] = useState('Inter, sans-serif');
-  const [smoothingFactor, setSmoothingFactor] = useState(0.1); // 0.05 (Slow) to 1.0 (Instant)
-  const [verticalOffset, setVerticalOffset] = useState(0); // -0.5 to 0.5 (Percentage of height)
+  const [smoothingFactor, setSmoothingFactor] = useState(0.1); 
+  const [verticalOffset, setVerticalOffset] = useState(0); 
+
+  // Qt6 Specific Settings
+  const [qt6Style, setQt6Style] = useState<Qt6Style>('wave');
+  const [qt6BarCount, setQt6BarCount] = useState(64);
+  const [qt6Sensitivity, setQt6Sensitivity] = useState(1.0);
 
   // Data State
   const [clipData, setClipData] = useState<SunoClip | null>(null);
   const [alignment, setAlignment] = useState<AlignedWord[] | null>(null);
   const [lines, setLines] = useState<AlignedWord[][]>([]);
-  const [lyricSource, setLyricSource] = useState(''); // Text source for structure
+  const [lyricSource, setLyricSource] = useState(''); 
   const [applyStatus, setApplyStatus] = useState<'idle' | 'applied'>('idle');
   
   // Audio/Canvas/Media References
@@ -105,7 +113,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const [renderProgress, setRenderProgress] = useState(0);
   const [isPreparing, setIsPreparing] = useState(false);
   const [isGrouping, setIsGrouping] = useState(false);
-  const [progress, setProgress] = useState(0); // Playback progress
+  const [progress, setProgress] = useState(0); 
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   
@@ -118,7 +126,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
             const ctx = new AudioContextClass();
             const analyser = ctx.createAnalyser();
-            analyser.fftSize = 2048;
+            analyser.fftSize = 2048; // Standard size
             analyser.smoothingTimeConstant = 0.8;
             
             const source = ctx.createMediaElementSource(audioRef.current);
@@ -128,7 +136,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             audioContextRef.current = ctx;
             analyserRef.current = analyser;
             sourceNodeRef.current = source;
-            dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
+            // Buffer size depends on mode, but 2048 covers both time and freq bins (1024)
+            dataArrayRef.current = new Uint8Array(analyser.fftSize);
         } catch (e) {
             console.error("Audio Context Init Failed:", e);
         }
@@ -139,15 +148,11 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   useEffect(() => {
     if (!clipData) return;
     let url = clipData.imageLargeUrl || clipData.imageUrl || `https://cdn2.suno.ai/image_large_${clipData.id}.jpeg`;
-    
-    // Use a Ref to ensure we only timestamp once per unique URL to prevent infinite reloads
     if (url.includes('suno.ai') && !url.includes('?')) {
         url += `?t=${Date.now()}`;
     }
-    
     setImgSrc(url);
     if (!lyricSource) {
-        // Fallback if not set by main load logic
         const raw = clipData.metadata?.prompt || clipData.originalData?.lyricsAlone || "";
         setLyricSource(raw);
     }
@@ -157,18 +162,17 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       setImgSrc('https://placehold.co/1080x1080/1e293b/475569?text=No+Cover');
   };
 
-  // Load Clip Data with API Fetch
+  // Load Clip Data
   useEffect(() => {
     if (!selectedClipId) return;
     setLines([]); 
     setApplyStatus('idle');
-    setCustomAudio(null); // Reset custom audio on change
+    setCustomAudio(null);
 
     const loadData = async () => {
         let currentClip = history.find(c => c.id === selectedClipId);
         let fetchedData: any = null;
 
-        // Try to fetch fresh metadata if cookie exists and not a draft
         if (sunoCookie && !selectedClipId.startsWith('draft_')) {
              try {
                  setIsPreparing(true);
@@ -183,7 +187,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             const prompt = meta.prompt || "";
             const tags = meta.tags || "";
             
-            // Construct enhanced clip
             currentClip = {
                 id: fetchedData.id,
                 title: fetchedData.title || (currentClip?.title || 'Untitled'),
@@ -191,28 +194,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 model_name: fetchedData.model_name || 'Unknown',
                 imageUrl: fetchedData.image_url || fetchedData.image_large_url,
                 imageLargeUrl: fetchedData.image_large_url,
-                metadata: {
-                    tags: tags,
-                    prompt: prompt
-                },
-                // Preserve originalData if we had it (Architect data)
+                metadata: { tags: tags, prompt: prompt },
                 originalData: currentClip?.originalData || {
-                    style: tags,
-                    title: fetchedData.title || '',
-                    excludeStyles: '',
-                    advancedParams: '',
-                    vocalGender: '',
-                    weirdness: 50,
-                    styleInfluence: 50,
-                    lyricsWithTags: prompt,
-                    lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(),
-                    javascriptCode: '',
-                    fullResponse: ''
+                    style: tags, title: fetchedData.title || '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 50, styleInfluence: 50, lyricsWithTags: prompt, lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(), javascriptCode: '', fullResponse: ''
                 },
                 alignmentData: currentClip?.alignmentData 
             };
         } else if (!currentClip) {
-             // Fallback for manual ID if fetch failed
              currentClip = {
                 id: selectedClipId,
                 title: '', 
@@ -225,14 +213,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         
         setClipData(currentClip);
 
-        // --- LYRIC SOURCE LOGIC ---
         let sourceText = currentClip.metadata?.prompt || "";
         if (!sourceText && currentClip.originalData?.lyricsAlone) {
             sourceText = currentClip.originalData.lyricsAlone;
         }
         setLyricSource(sourceText);
 
-        // Fetch Alignment if needed
         let align = currentClip.alignmentData;
         if (!align && sunoCookie && !currentClip.id.startsWith('draft_')) {
              try {
@@ -240,7 +226,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                  const res = await getLyricAlignment(currentClip.id, sunoCookie);
                  if (res && res.aligned_words) {
                      align = res.aligned_words;
-                     
                      if (history.some(h => h.id === currentClip.id)) {
                         onUpdateClip(currentClip.id, { alignmentData: align });
                      }
@@ -251,7 +236,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         }
         setAlignment(align || null);
 
-        // Group Lines
         if (align) {
              let autoLines;
              if (sourceText) {
@@ -269,9 +253,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   }, [selectedClipId, history, sunoCookie, onUpdateClip]);
 
   const handleManualLoad = () => {
-      if (manualId.trim()) {
-          setSelectedClipId(manualId.trim());
-      }
+      if (manualId.trim()) setSelectedClipId(manualId.trim());
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -279,15 +261,11 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     if (file) {
         const url = URL.createObjectURL(file);
         let type: 'video' | 'image' = 'image';
-        
-        if (file.type.startsWith('video')) {
-            type = 'video';
-        } else if (file.name.match(/\.(mp4|webm|mov|mkv)$/i)) {
+        if (file.type.startsWith('video') || file.name.match(/\.(mp4|webm|mov|mkv)$/i)) {
             type = 'video';
         }
-        
         setCustomBg({ url, type, name: file.name });
-        setVisualMode('cover'); // Switch to cover/custom mode
+        setVisualMode('cover'); 
     }
   };
 
@@ -296,7 +274,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     if (file) {
         const url = URL.createObjectURL(file);
         setCustomAudio({ url, name: file.name });
-        // Force pause if playing to avoid state mismatch
         if (audioRef.current && !audioRef.current.paused) {
             audioRef.current.pause();
             setIsPlaying(false);
@@ -354,7 +331,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   const togglePlay = () => {
       if (audioRef.current) {
           if (audioRef.current.paused) {
-              // Resume Audio Context if needed
               if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
                   audioContextRef.current.resume();
               }
@@ -371,9 +347,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     let c: any;
     if(/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)){
         c= hex.substring(1).split('');
-        if(c.length== 3){
-            c= [c[0], c[0], c[1], c[1], c[2], c[2]];
-        }
+        if(c.length== 3) c= [c[0], c[0], c[1], c[1], c[2], c[2]];
         c= '0x'+c.join('');
         return 'rgba('+[(c>>16)&255, (c>>8)&255, c&255].join(',')+','+alpha+')';
     }
@@ -381,75 +355,125 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
   }
 
   const drawCover = (ctx: CanvasRenderingContext2D, img: CanvasImageSource | HTMLVideoElement | HTMLImageElement, w: number, h: number) => {
-        let imgW = 0;
-        let imgH = 0;
-        if (img instanceof HTMLVideoElement) {
-            imgW = img.videoWidth;
-            imgH = img.videoHeight;
-        } else if (img instanceof HTMLImageElement) {
-            imgW = img.naturalWidth || img.width;
-            imgH = img.naturalHeight || img.height;
-        }
+        let imgW = 0; let imgH = 0;
+        if (img instanceof HTMLVideoElement) { imgW = img.videoWidth; imgH = img.videoHeight; } 
+        else if (img instanceof HTMLImageElement) { imgW = img.naturalWidth || img.width; imgH = img.naturalHeight || img.height; }
         if (!imgW || !imgH) return;
-        const imgRatio = imgW / imgH;
-        const winRatio = w / h;
+        const imgRatio = imgW / imgH; const winRatio = w / h;
         let drawW, drawH, startX, startY;
-        if (imgRatio > winRatio) {
-            drawH = h;
-            drawW = h * imgRatio;
-            startX = (w - drawW) / 2;
-            startY = 0;
-        } else {
-            drawW = w;
-            drawH = w / imgRatio;
-            startX = 0;
-            startY = (h - drawH) / 2;
-        }
+        if (imgRatio > winRatio) { drawH = h; drawW = h * imgRatio; startX = (w - drawW) / 2; startY = 0; } 
+        else { drawW = w; drawH = w / imgRatio; startX = 0; startY = (h - drawH) / 2; }
         ctx.drawImage(img, startX, startY, drawW, drawH);
   };
 
-  const drawQt6Visualizer = (ctx: CanvasRenderingContext2D, width: number, height: number, data: Uint8Array | Float32Array) => {
-        const bufferLength = data.length;
-        const sliceWidth = width / bufferLength;
-        let x = 0;
-
+  const drawQt6Visualizer = (ctx: CanvasRenderingContext2D, width: number, height: number, data: Uint8Array | Float32Array, type: Qt6Style) => {
         ctx.lineWidth = 2;
         ctx.strokeStyle = activeColor;
+        ctx.fillStyle = activeColor;
         ctx.beginPath();
 
+        const bufferLength = data.length;
         const isFloat = data instanceof Float32Array;
-        
-        // Position at bottom 15% of screen (baseline)
-        const baseline = height * 0.85;
-        // Limit amplitude to avoid overlapping lyrics too much
-        const scale = height * 0.15;
 
-        for (let i = 0; i < bufferLength; i++) {
-            let v = 0;
-            if (isFloat) {
-                // Float32Array is -1.0 to 1.0
-                v = data[i] as number;
-            } else {
-                // Uint8Array is 0 to 255, 128 is silence
-                v = ((data[i] as number) - 128) / 128.0;
+        // Waveform Logic (Time Domain)
+        if (type === 'wave') {
+            const sliceWidth = width / bufferLength;
+            let x = 0;
+            // Position at bottom 15% (baseline)
+            const baseline = height * 0.85;
+            const scale = height * 0.15 * qt6Sensitivity;
+
+            for (let i = 0; i < bufferLength; i++) {
+                let v = 0;
+                if (isFloat) v = data[i] as number;
+                else v = ((data[i] as number) - 128) / 128.0;
+                
+                const y = baseline + (v * scale);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+                x += sliceWidth;
             }
-
-            const y = baseline + (v * scale);
-
-            if (i === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
+            ctx.stroke();
+        } 
+        // Bars Logic (Frequency Domain)
+        else if (type === 'bars') {
+            const barCount = qt6BarCount;
+            // We usually have 1024 bins. We want to aggregate them into barCount.
+            // Ignore high frequencies (> 16kHz) which are usually empty/noise
+            const usefulBinLimit = Math.floor(bufferLength * 0.7); 
+            const step = Math.floor(usefulBinLimit / barCount);
+            const barWidth = (width / barCount) * 0.8;
+            const gap = (width / barCount) * 0.2;
+            
+            for(let i = 0; i < barCount; i++) {
+                let sum = 0;
+                for(let j = 0; j < step; j++) {
+                    const idx = i * step + j;
+                    if(idx < bufferLength) {
+                        sum += (data[idx] as number);
+                    }
+                }
+                const avg = sum / step;
+                // Scale 0-255 to height
+                const val = (avg / 255.0) * qt6Sensitivity;
+                const barHeight = val * (height * 0.4);
+                
+                const x = i * (barWidth + gap) + (gap / 2);
+                const y = height * 0.95 - barHeight;
+                
+                // Rounded tops
+                ctx.roundRect(x, y, barWidth, barHeight, 4);
+                ctx.fill();
+                // Also reset path for next
+                ctx.beginPath();
             }
-
-            x += sliceWidth;
         }
+        // Circle Logic (Frequency Domain)
+        else if (type === 'circle') {
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = Math.min(width, height) * 0.25;
+            const barLenMax = Math.min(width, height) * 0.2;
+            
+            // Mirror bars around circle
+            const bars = 64; // Fixed reasonable count for circle
+            const step = Math.floor((bufferLength * 0.6) / bars);
+            const angleStep = (Math.PI * 2) / bars;
 
-        ctx.stroke();
+            for(let i = 0; i < bars; i++) {
+                let sum = 0;
+                for(let j = 0; j < step; j++) {
+                    sum += (data[i * step + j] as number);
+                }
+                const avg = sum / step;
+                const val = (avg / 255.0) * qt6Sensitivity;
+                const barH = Math.max(4, val * barLenMax);
+
+                const angle = i * angleStep - (Math.PI / 2); // Start top
+                
+                const x1 = centerX + Math.cos(angle) * radius;
+                const y1 = centerY + Math.sin(angle) * radius;
+                const x2 = centerX + Math.cos(angle) * (radius + barH);
+                const y2 = centerY + Math.sin(angle) * (radius + barH);
+
+                ctx.lineWidth = 4;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            }
+            
+            // Inner Glow Circle
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius - 5, 0, Math.PI * 2);
+            ctx.fillStyle = hexToRgba(activeColor, 0.1);
+            ctx.fill();
+        }
   };
 
   // --- DRAWING LOGIC ---
-  const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number, overrideSmoothing?: number, offlineAudioBuffer?: AudioBuffer) => {
+  const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number, data?: Uint8Array | Float32Array, isFrequencyData: boolean = false) => {
       // 1. Background Layer
       ctx.fillStyle = '#1e1e1e';
       ctx.fillRect(0, 0, width, height);
@@ -474,7 +498,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 drawCover(ctx, bgImg, width, height);
             }
           }
-          // Overlay Dimmer for Cover Art mode
+          // Overlay Dimmer
           ctx.fillStyle = 'rgba(0,0,0,0.7)';
           ctx.fillRect(0, 0, width, height);
       } else if (visualMode === 'qt6') {
@@ -485,27 +509,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           ctx.fillStyle = grad;
           ctx.fillRect(0, 0, width, height);
 
-          // Render Waveform
-          if (offlineAudioBuffer) {
-              // Offline extraction
-              const samples = 2048;
-              const sampleRate = offlineAudioBuffer.sampleRate;
-              const startSample = Math.floor(time * sampleRate);
-              const channelData = offlineAudioBuffer.getChannelData(0);
-              
-              // Safe slice
-              let slice: Float32Array;
-              if (startSample + samples < channelData.length) {
-                  slice = channelData.subarray(startSample, startSample + samples);
-              } else {
-                  slice = new Float32Array(samples); // Silence at end
-              }
-              drawQt6Visualizer(ctx, width, height, slice);
-
+          // Render Visualizer
+          if (data) {
+              drawQt6Visualizer(ctx, width, height, data, qt6Style);
           } else if (analyserRef.current && dataArrayRef.current) {
               // Realtime extraction
-              analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
-              drawQt6Visualizer(ctx, width, height, dataArrayRef.current);
+              if (qt6Style === 'wave') {
+                  analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
+                  drawQt6Visualizer(ctx, width, height, dataArrayRef.current, 'wave');
+              } else {
+                  analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+                  drawQt6Visualizer(ctx, width, height, dataArrayRef.current, qt6Style);
+              }
           }
       }
 
@@ -540,7 +555,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               if (Math.abs(diff) > 4) {
                   smoothLineIdxRef.current = activeLineIdx;
               } else {
-                  const factor = overrideSmoothing ?? smoothingFactor;
+                  const factor = smoothingFactor;
                   smoothLineIdxRef.current += diff * factor;
               }
           }
@@ -676,52 +691,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               ctx.shadowBlur = 0;
           });
 
-      } else if (alignment) {
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          const cleanAligned = getCleanAlignedWords(alignment);
-          const activeIndex = cleanAligned.findIndex(w => time >= w.start_s && time <= w.end_s);
-          const upcomingIndex = cleanAligned.findIndex(w => w.start_s > time);
-          
-          let baseIndex = activeIndex !== -1 ? activeIndex : (upcomingIndex !== -1 ? upcomingIndex : cleanAligned.length - 1);
-          if (baseIndex < 0) baseIndex = 0;
-
-          const diff = baseIndex - smoothLineIdxRef.current;
-          if (Math.abs(diff) > 5) smoothLineIdxRef.current = baseIndex;
-          else {
-              const factor = overrideSmoothing ?? smoothingFactor;
-              smoothLineIdxRef.current += diff * factor;
-          }
-
-          const renderIdx = smoothLineIdxRef.current;
-          const startWindow = Math.floor(renderIdx) - 2;
-          const endWindow = Math.floor(renderIdx) + 3;
-          
-          const lineHeight = 70;
-          const centerY = (height / 2) + (height * verticalOffset);
-          const pixelOffset = (renderIdx - Math.floor(renderIdx)) * lineHeight;
-
-          for (let i = startWindow; i <= endWindow; i++) {
-               if(i >= 0 && i < cleanAligned.length) {
-                   const wordObj = cleanAligned[i];
-                   const relIdx = i - Math.floor(renderIdx);
-                   const drawY = centerY - pixelOffset + (relIdx * lineHeight);
-                   
-                   const dist = Math.abs(i - renderIdx);
-                   const isCurrent = i === activeIndex;
-                   const opacity = Math.max(0.2, 1 - dist * 0.4);
-                   const scale = Math.max(0.5, 1 - dist * 0.2);
-                   
-                   ctx.font = `bold ${56 * scale}px ${fontFamily}`;
-                   ctx.fillStyle = isCurrent ? activeColor : hexToRgba(inactiveColor, opacity);
-                   if (isCurrent) {
-                       ctx.shadowColor = activeColor;
-                       ctx.shadowBlur = 20;
-                   }
-                   ctx.fillText(wordObj.word, width / 2, drawY);
-                   ctx.shadowBlur = 0;
-               }
-          }
       }
 
       // Title & Progress Bar
@@ -734,8 +703,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           ctx.fillText(clipData.title, width / 2, titleY);
       }
 
-      if (clipData && audioRef.current && audioRef.current.duration) {
-          const pct = time / audioRef.current.duration;
+      if (clipData && duration) {
+          const pct = time / duration;
           ctx.fillStyle = activeColor;
           ctx.fillRect(0, height - 8, width * pct, 8);
       }
@@ -767,13 +736,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       return () => {
           if (requestRef.current) cancelAnimationFrame(requestRef.current);
       };
-  }, [selectedClipId, alignment, lines, isRendering, aspectRatio, visualMode, customBg, activeColor, inactiveColor, fontFamily, smoothingFactor, inactiveOpacity, verticalOffset]);
+  }, [selectedClipId, alignment, lines, isRendering, aspectRatio, visualMode, customBg, activeColor, inactiveColor, fontFamily, smoothingFactor, inactiveOpacity, verticalOffset, qt6Style, qt6BarCount, qt6Sensitivity]);
 
   // --- OFFLINE RENDERING LOGIC ---
   const startOfflineRender = async () => {
     if (!clipData || !audioRef.current || !canvasRef.current) return;
     
-    // Pause any preview playback
     audioRef.current.pause();
     if(customVideoRef.current) customVideoRef.current.pause();
 
@@ -791,55 +759,50 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         const audioSrc = audioRef.current.src;
         const response = await fetch(audioSrc);
         const arrayBuffer = await response.arrayBuffer();
+
+        // FIX: Decode audio first to get length and sample rate
+        const audioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        const tempCtx = new audioContextClass();
+        const decodedBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
         
-        if (!audioContextRef.current) {
-            audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-        }
-        const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
-        const duration = audioBuffer.duration;
+        // We use OfflineAudioContext for extracting analysis data frame-by-frame
+        const offlineCtx = new OfflineAudioContext(2, decodedBuffer.length, decodedBuffer.sampleRate);
+        const source = offlineCtx.createBufferSource();
+        source.buffer = decodedBuffer;
+        
+        // Setup Analysis for Offline
+        const analyser = offlineCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.8;
+        source.connect(analyser);
+        analyser.connect(offlineCtx.destination);
+        source.start(0);
 
+        const duration = source.buffer.duration;
         const { width: targetWidth, height: targetHeight } = ASPECT_RATIOS[aspectRatio];
-
         const filename = `${(clipData.title || 'video').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${aspectRatio.replace(':','-')}.webm`;
+        
+        // Setup Muxer & Encoders
         let muxerTarget: any;
-
         if ('showSaveFilePicker' in window) {
             try {
                 fileHandle = await (window as any).showSaveFilePicker({
                     suggestedName: filename,
-                    types: [{
-                        description: 'WebM Video',
-                        accept: { 'video/webm': ['.webm'] },
-                    }],
+                    types: [{ description: 'WebM Video', accept: { 'video/webm': ['.webm'] } }],
                 });
                 writableStream = await fileHandle.createWritable();
                 muxerTarget = new FileSystemWritableFileStreamTarget(writableStream);
             } catch (err: any) {
-                if (err.name === 'AbortError') {
-                    setIsRendering(false);
-                    smoothLineIdxRef.current = originalSmoothRef;
-                    return;
-                }
+                if (err.name === 'AbortError') { setIsRendering(false); smoothLineIdxRef.current = originalSmoothRef; return; }
                 console.warn("File System Access failed, falling back to RAM.", err);
             }
         }
-
-        if (!muxerTarget) {
-            muxerTarget = new ArrayBufferTarget();
-        }
+        if (!muxerTarget) muxerTarget = new ArrayBufferTarget();
 
         const muxer = new Muxer({
             target: muxerTarget,
-            video: {
-                codec: 'V_VP9',
-                width: targetWidth,
-                height: targetHeight
-            },
-            audio: {
-                codec: 'A_OPUS',
-                numberOfChannels: 2,
-                sampleRate: 48000
-            }
+            video: { codec: 'V_VP9', width: targetWidth, height: targetHeight },
+            audio: { codec: 'A_OPUS', numberOfChannels: 2, sampleRate: 48000 }
         });
 
         // @ts-ignore
@@ -848,11 +811,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             error: (e: any) => console.error("Video Encoder error", e)
         });
         videoEncoder.configure({
-            codec: 'vp09.00.10.08',
-            width: targetWidth,
-            height: targetHeight,
-            bitrate: 8_000_000, 
-            framerate: 60
+            codec: 'vp09.00.10.08', width: targetWidth, height: targetHeight, bitrate: 8_000_000, framerate: 60
         });
 
         // @ts-ignore
@@ -860,90 +819,81 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             output: (chunk: any, meta: any) => muxer.addAudioChunk(chunk, meta),
             error: (e: any) => console.error("Audio Encoder error", e)
         });
-        audioEncoder.configure({
-            codec: 'opus',
-            numberOfChannels: 2,
-            sampleRate: 48000,
-            bitrate: audioBitrate // Use selected bitrate
-        });
+        audioEncoder.configure({ codec: 'opus', numberOfChannels: 2, sampleRate: 48000, bitrate: audioBitrate });
 
         const fps = 60;
         const totalFrames = Math.ceil(duration * fps);
         const ctx = canvasRef.current.getContext('2d')!;
-        
         canvasRef.current.width = targetWidth;
         canvasRef.current.height = targetHeight;
 
-        for (let i = 0; i < totalFrames; i++) {
-            if (videoEncoder.encodeQueueSize > 5) {
-                while (videoEncoder.encodeQueueSize > 2) {
-                    await new Promise(r => setTimeout(r, 10));
-                }
-            }
-
-            const t = i / fps;
-
+        let frameIndex = 0;
+        const processFrame = async () => {
+            const t = frameIndex / fps;
+            
+            // Sync custom video background if needed
             if (visualMode === 'cover' && customBg?.type === 'video' && customVideoRef.current) {
                 const vid = customVideoRef.current;
                 const loopTime = t % vid.duration;
-                if (Math.abs(vid.currentTime - loopTime) > 0.001) {
-                    vid.currentTime = loopTime;
-                    await new Promise<void>(resolve => {
-                         const onSeek = () => {
-                             vid.removeEventListener('seeked', onSeek);
-                             resolve();
-                         };
-                         vid.addEventListener('seeked', onSeek);
-                    });
-                }
+                // Basic seek emulation
+                vid.currentTime = loopTime; 
+                // We rely on browser having frame available; might be glitchy without drawing to temp canvas
             }
 
-            renderFrame(ctx, targetWidth, targetHeight, t, undefined, audioBuffer);
+            // Extract Data
+            const freqData = new Uint8Array(analyser.frequencyBinCount);
+            if (qt6Style === 'wave') {
+                analyser.getByteTimeDomainData(freqData);
+            } else {
+                analyser.getByteFrequencyData(freqData);
+            }
+
+            renderFrame(ctx, targetWidth, targetHeight, t, freqData);
             
             // @ts-ignore
             const frame = new VideoFrame(canvasRef.current, { timestamp: t * 1000000 });
-            
-            videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+            videoEncoder.encode(frame, { keyFrame: frameIndex % (fps * 2) === 0 });
             frame.close();
 
-            if (i % 15 === 0) {
-                setRenderProgress((i / totalFrames) * 100);
-                await new Promise(r => setTimeout(r, 0));
+            if (videoEncoder.encodeQueueSize > 5) {
+                await videoEncoder.flush();
             }
-        }
 
-        const numberOfChannels = 2;
-        const sourceChannels = audioBuffer.numberOfChannels;
-        const audioDataLength = audioBuffer.length;
-        const sourceSampleRate = audioBuffer.sampleRate;
-        
-        const getChannelData = (channel: number) => {
-             if (channel < sourceChannels) return audioBuffer.getChannelData(channel);
-             return audioBuffer.getChannelData(0);
+            frameIndex++;
+            setRenderProgress((frameIndex / totalFrames) * 100);
+            
+            if (frameIndex < totalFrames) {
+                offlineCtx.suspend((frameIndex) / fps).then(processFrame).then(() => offlineCtx.resume());
+            } else {
+                offlineCtx.resume(); // Finish up
+            }
         };
 
+        // Trigger first frame at 0
+        offlineCtx.suspend(0).then(processFrame).then(() => offlineCtx.resume());
+        
+        // Start Processing
+        await offlineCtx.startRendering();
+
+        // Encode Audio Track (Manual extraction from buffer since we need 48k for muxer)
+        const sourceBuffer = decodedBuffer;
+        const numberOfChannels = 2;
+        const audioDataLength = sourceBuffer.length;
+        const sourceSampleRate = sourceBuffer.sampleRate;
         const chunkFrames = 48000;
+        
         for (let offset = 0; offset < audioDataLength; offset += chunkFrames) {
             const end = Math.min(offset + chunkFrames, audioDataLength);
             const frames = end - offset;
             const data = new Float32Array(frames * numberOfChannels);
-            
             for (let ch = 0; ch < numberOfChannels; ch++) {
-                const srcData = getChannelData(ch);
-                const chunkData = srcData.subarray(offset, end);
-                data.set(chunkData, ch * frames);
+                const srcData = sourceBuffer.getChannelData(ch < sourceBuffer.numberOfChannels ? ch : 0);
+                data.set(srcData.subarray(offset, end), ch * frames);
             }
-
             // @ts-ignore
             const audioData = new AudioData({
-                format: 'f32-planar',
-                sampleRate: sourceSampleRate,
-                numberOfFrames: frames,
-                numberOfChannels: numberOfChannels,
-                timestamp: (offset / sourceSampleRate) * 1000000,
-                data: data
+                format: 'f32-planar', sampleRate: sourceSampleRate, numberOfFrames: frames, numberOfChannels: numberOfChannels, timestamp: (offset / sourceSampleRate) * 1000000, data: data
             });
-
             audioEncoder.encode(audioData);
             audioData.close();
         }
@@ -952,24 +902,17 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         await audioEncoder.flush();
         muxer.finalize();
 
-        if (writableStream) {
-            await writableStream.close();
-        } else {
+        if (writableStream) { await writableStream.close(); } 
+        else {
             const { buffer } = muxer.target;
             const blob = new Blob([buffer], { type: 'video/webm' });
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
         }
 
     } catch (e) {
         console.error("Offline render failed", e);
-        alert("Render failed. Your browser might not support WebCodecs or there was a data error.");
+        alert("Render failed. Check console.");
     } finally {
         setIsRendering(false);
         setRenderProgress(0);
@@ -1055,7 +998,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
                      {/* Media & Composition Card */}
                      <div className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 shadow-lg p-4 space-y-4">
-                         {/* Cover Art */}
+                         {/* Cover Art / Visualizer Preview */}
                          <div className="relative group rounded-lg overflow-hidden border border-slate-700/50">
                              {visualMode === 'cover' ? (
                                 <>
@@ -1091,15 +1034,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                     )}
                                 </>
                              ) : (
-                                <div className="w-full h-32 bg-gradient-to-b from-slate-800 to-black flex items-center justify-center border-b border-slate-700">
-                                    <div className="text-center">
-                                        <div className="w-12 h-8 bg-purple-500/20 mx-auto mb-2 flex items-end justify-center gap-1 rounded overflow-hidden">
-                                            <div className="w-1 h-3 bg-purple-500 animate-pulse"></div>
-                                            <div className="w-1 h-5 bg-purple-500 animate-pulse delay-75"></div>
-                                            <div className="w-1 h-2 bg-purple-500 animate-pulse delay-150"></div>
-                                            <div className="w-1 h-4 bg-purple-500 animate-pulse delay-100"></div>
-                                        </div>
-                                        <span className="text-xs font-bold text-white uppercase tracking-wider">Qt6 Visualizer</span>
+                                <div className="w-full h-32 bg-gradient-to-b from-slate-800 to-black flex flex-col items-center justify-center border-b border-slate-700 gap-2">
+                                    <span className="text-xs font-bold text-white uppercase tracking-wider">Qt6 Style: {qt6Style}</span>
+                                    <div className="flex gap-2">
+                                        <div className={`w-2 h-6 rounded-full ${qt6Style === 'wave' ? 'bg-purple-500' : 'bg-slate-700'}`}></div>
+                                        <div className={`w-2 h-6 rounded-full ${qt6Style === 'bars' ? 'bg-purple-500' : 'bg-slate-700'}`}></div>
+                                        <div className={`w-2 h-6 rounded-full ${qt6Style === 'circle' ? 'bg-purple-500' : 'bg-slate-700'}`}></div>
                                     </div>
                                 </div>
                              )}
@@ -1365,6 +1305,9 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                  setFontFamily('Inter, sans-serif');
                                  setSmoothingFactor(0.1);
                                  setVerticalOffset(0);
+                                 setQt6Style('wave');
+                                 setQt6BarCount(64);
+                                 setQt6Sensitivity(1.0);
                              }} className="text-xs text-purple-400 hover:text-purple-300">Reset to Default</button>
                          </div>
                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1439,6 +1382,53 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                              </div>
                          </div>
                      </div>
+
+                     {/* Qt6 Specific Controls (Visible if mode is Qt6) */}
+                     {visualMode === 'qt6' && (
+                         <div className="bg-slate-900 border border-purple-500/20 rounded-xl p-4 animate-in fade-in">
+                             <h3 className="text-xs font-bold text-purple-400 uppercase tracking-wider mb-3">Qt6 Visualizer Controls</h3>
+                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                 <div>
+                                     <label className="text-[10px] text-slate-500 block mb-1">Type</label>
+                                     <select 
+                                        value={qt6Style}
+                                        onChange={(e) => setQt6Style(e.target.value as Qt6Style)}
+                                        className="w-full bg-slate-800 border border-slate-700 rounded p-1.5 text-xs text-white focus:ring-1 focus:ring-purple-500"
+                                     >
+                                         <option value="wave">Oscilloscope (Wave)</option>
+                                         <option value="bars">Stylish Bars</option>
+                                         <option value="circle">Expanding Circle</option>
+                                     </select>
+                                 </div>
+                                 {qt6Style === 'bars' && (
+                                     <div>
+                                         <label className="text-[10px] text-slate-500 block mb-1">Bar Count</label>
+                                         <select 
+                                            value={qt6BarCount}
+                                            onChange={(e) => setQt6BarCount(Number(e.target.value))}
+                                            className="w-full bg-slate-800 border border-slate-700 rounded p-1.5 text-xs text-white"
+                                         >
+                                             <option value="32">32 Bars (Chunky)</option>
+                                             <option value="64">64 Bars (Standard)</option>
+                                             <option value="128">128 Bars (Detailed)</option>
+                                         </select>
+                                     </div>
+                                 )}
+                                 <div>
+                                     <label className="text-[10px] text-slate-500 block mb-1">Sensitivity (Gain)</label>
+                                     <input 
+                                        type="range" 
+                                        min="0.5" 
+                                        max="3.0" 
+                                        step="0.1" 
+                                        value={qt6Sensitivity}
+                                        onChange={(e) => setQt6Sensitivity(parseFloat(e.target.value))}
+                                        className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                     />
+                                 </div>
+                             </div>
+                         </div>
+                     )}
 
                      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
                          <div className="relative group">
