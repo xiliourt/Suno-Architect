@@ -57,7 +57,7 @@ const FONTS = [
     { label: "Courier Prime (Mono)", value: "'Courier Prime', monospace" },
 ];
 
-type Qt6Style = 'wave' | 'bars' | 'circle';
+type Qt6Style = 'wave' | 'bars' | 'circle' | 'circular-wave';
 
 const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCookie, onUpdateClip, apiKey, geminiModel }) => {
   // Selection State
@@ -376,21 +376,50 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
         // Waveform Logic (Time Domain)
         if (type === 'wave') {
-            const sliceWidth = width / bufferLength;
-            let x = 0;
-            const baseline = height * 0.85;
-            const scale = height * 0.15 * qt6Sensitivity;
+            // Find Zero Crossing to stabilize wave
+            // We search in the first half of the buffer to trigger
+            let trigger = 0;
+            const searchLimit = Math.floor(bufferLength / 2);
+            for (let i = 0; i < searchLimit; i++) {
+                const val = isFloat ? (data[i] as number) : ((data[i] as number) - 128) / 128.0;
+                const nextVal = isFloat ? (data[i+1] as number) : ((data[i+1] as number) - 128) / 128.0;
+                // Zero-crossing from negative/zero to positive
+                if (val <= 0 && nextVal > 0) {
+                    trigger = i;
+                    break;
+                }
+            }
 
-            for (let i = 0; i < bufferLength; i++) {
+            // Zoom in slightly by drawing a fixed window instead of the whole buffer
+            // This prevents high-freq noise from looking like static fuzz
+            const windowSize = Math.floor(bufferLength * 0.5); 
+            const sliceWidth = width / windowSize;
+            
+            const baseline = height * 0.5; // Center it
+            const scale = height * 0.4 * qt6Sensitivity;
+
+            ctx.beginPath();
+            for (let i = 0; i < windowSize; i++) {
+                const idx = trigger + i;
+                if (idx >= bufferLength) break;
+
                 let v = 0;
-                if (isFloat) v = data[i] as number;
-                else v = ((data[i] as number) - 128) / 128.0;
+                if (isFloat) v = data[idx] as number;
+                else v = ((data[idx] as number) - 128) / 128.0;
                 
-                const y = baseline + (v * scale);
+                const y = baseline - (v * scale); // Invert y for canvas
+                const x = i * sliceWidth;
+
                 if (i === 0) ctx.moveTo(x, y);
                 else ctx.lineTo(x, y);
-                x += sliceWidth;
             }
+            
+            // Fade out the right edge to prevent hard cuts
+            const grad = ctx.createLinearGradient(width * 0.8, 0, width, 0);
+            grad.addColorStop(0, activeColor);
+            grad.addColorStop(1, hexToRgba(activeColor, 0));
+            ctx.strokeStyle = grad;
+            
             ctx.stroke();
         } 
         // Bars Logic (Frequency Domain)
@@ -406,6 +435,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             
             const barWidth = (width / barCount) * 0.8;
             const gap = (width / barCount) * 0.2;
+            
+            ctx.fillStyle = activeColor;
             
             for(let i = 0; i < barCount; i++) {
                 let sum = 0;
@@ -434,7 +465,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 ctx.fill();
             }
         }
-        // Circle Logic (Frequency Domain)
+        // Circle Logic (Frequency Domain - Expanding Bars)
         else if (type === 'circle') {
             const centerX = width / 2;
             const centerY = height / 2;
@@ -449,7 +480,6 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             const currentRadius = baseRadius + (bassEnergy * 20);
 
             // Mirror Spectrum: Lows at top, Highs at bottom
-            // Use 64 total bars (32 per side)
             const totalBars = 64; 
             const halfBars = totalBars / 2;
             
@@ -499,6 +529,91 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             ctx.strokeStyle = hexToRgba(activeColor, 0.5);
             ctx.lineWidth = 2;
             ctx.stroke();
+        }
+        // Circular Wave (Frequency Domain - Contiguous Fluid Shape)
+        else if (type === 'circular-wave') {
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = Math.min(width, height) * 0.2;
+            const maxAmp = Math.min(width, height) * 0.25;
+
+            // Calculate overall energy for pulsing
+            let energy = 0;
+            // Drastically reduce limit to focus on active frequencies (0-8kHz approx)
+            // This prevents "dead" static sections at the bottom (high freq)
+            const usefulLimit = Math.floor(bufferLength * 0.35); 
+            
+            for(let i=2; i<20; i++) energy += (data[i] as number);
+            const pulse = (energy / 18 / 255.0) * 15 * qt6Sensitivity;
+
+            const numPoints = 120;
+            const wavePoints: {x: number, y: number}[] = [];
+
+            for (let i = 0; i < numPoints; i++) {
+                // Mirror: Low -> High -> Low
+                const relativeIdx = i < (numPoints / 2) 
+                    ? i / (numPoints / 2) 
+                    : (numPoints - i) / (numPoints / 2);
+                
+                // Use a slight log-like curve to map index, pushing more detail to lows
+                // Math.pow(relativeIdx, 1.5) puts more emphasis on low freqs
+                const mappedIdx = Math.floor(Math.pow(relativeIdx, 1.2) * (usefulLimit - 2)) + 2;
+                
+                // Smoothing window
+                let sum = 0;
+                let count = 0;
+                for(let w = -1; w <= 1; w++) {
+                    const idx = mappedIdx + w;
+                    if(idx >= 0 && idx < usefulLimit) {
+                        sum += (data[idx] as number);
+                        count++;
+                    }
+                }
+                const val = count > 0 ? sum / count : 0;
+
+                const scaledVal = Math.pow(val / 255.0, 1.5); 
+                const offset = scaledVal * maxAmp * qt6Sensitivity;
+                
+                const r = radius + pulse + offset;
+                
+                // Map i to angle: 0 to 2PI (start from top -PI/2)
+                const angle = (Math.PI * 2 * i) / numPoints - (Math.PI / 2);
+                
+                wavePoints.push({
+                    x: centerX + Math.cos(angle) * r,
+                    y: centerY + Math.sin(angle) * r
+                });
+            }
+
+            // Draw Smooth Curve
+            ctx.beginPath();
+            if (wavePoints.length > 0) {
+                const last = wavePoints[wavePoints.length - 1];
+                const first = wavePoints[0];
+                const midX = (last.x + first.x) / 2;
+                const midY = (last.y + first.y) / 2;
+                
+                ctx.moveTo(midX, midY);
+
+                for (let i = 0; i < wavePoints.length; i++) {
+                    const p = wavePoints[i];
+                    const nextP = wavePoints[(i + 1) % wavePoints.length];
+                    const midNextX = (p.x + nextP.x) / 2;
+                    const midNextY = (p.y + nextP.y) / 2;
+                    ctx.quadraticCurveTo(p.x, p.y, midNextX, midNextY);
+                }
+            }
+            
+            ctx.closePath();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = activeColor;
+            ctx.stroke();
+            
+            const grad = ctx.createRadialGradient(centerX, centerY, radius * 0.5, centerX, centerY, radius + maxAmp);
+            grad.addColorStop(0, hexToRgba(activeColor, 0.05));
+            grad.addColorStop(1, hexToRgba(activeColor, 0.25));
+            ctx.fillStyle = grad;
+            ctx.fill();
         }
   };
 
@@ -1082,6 +1197,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                         <div className={`w-2 h-6 rounded-full ${qt6Style === 'wave' ? 'bg-purple-500' : 'bg-slate-700'}`}></div>
                                         <div className={`w-2 h-6 rounded-full ${qt6Style === 'bars' ? 'bg-purple-500' : 'bg-slate-700'}`}></div>
                                         <div className={`w-2 h-6 rounded-full ${qt6Style === 'circle' ? 'bg-purple-500' : 'bg-slate-700'}`}></div>
+                                        <div className={`w-2 h-6 rounded-full ${qt6Style === 'circular-wave' ? 'bg-purple-500' : 'bg-slate-700'}`}></div>
                                     </div>
                                 </div>
                              )}
@@ -1440,6 +1556,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                                          <option value="wave">Oscilloscope (Wave)</option>
                                          <option value="bars">Stylish Bars</option>
                                          <option value="circle">Expanding Circle</option>
+                                         <option value="circular-wave">Circular Wave</option>
                                      </select>
                                  </div>
                                  {qt6Style === 'bars' && (
