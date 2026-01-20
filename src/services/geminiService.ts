@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { ParsedSunoOutput, AlignedWord, FileContext } from "../types";
 import { GET_STRICT_OUTPUT_SUFFIX } from "../constants";
@@ -161,7 +160,7 @@ const constructParsedOutput = (matches: string[], rawText: string): ParsedSunoOu
   return result;
 };
 
-const generateJsCode = (data: ParsedSunoOutput): string => {
+export const generateJsCode = (data: ParsedSunoOutput): string => {
     return `
 function setNativeValue(element, value) {
     if (!element) return;
