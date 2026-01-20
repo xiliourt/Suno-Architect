@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import InputSection from './components/InputSection';
 import OutputSection from './components/OutputSection';
@@ -297,6 +298,15 @@ const App: React.FC = () => {
     }
   };
 
+  const handleUpdateResult = (index: number, updatedTrack: ParsedSunoOutput) => {
+    setState(prev => {
+      if (!prev.result) return prev;
+      const newResult = [...prev.result];
+      newResult[index] = updatedTrack;
+      return { ...prev, result: newResult };
+    });
+  };
+
   const handleGenerate = async (prompt: string, files: FileContext[] = [], numTracks: number = 1) => {
     setState((prev) => ({ ...prev, isLoading: true, error: null, result: null }));
     try {
@@ -396,6 +406,7 @@ const App: React.FC = () => {
                             sunoCookie={sunoCookie}
                             sunoModel={sunoModel}
                             onSyncSuccess={handleSyncSuccess}
+                            onUpdateTrack={handleUpdateResult}
                         />
                         ) : (
                         <div className="h-full flex flex-col items-center justify-center p-12 text-center border-2 border-dashed border-slate-800 rounded-2xl bg-slate-900/20 text-slate-600 min-h-[400px]">
