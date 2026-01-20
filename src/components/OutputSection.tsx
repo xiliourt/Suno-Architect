@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { ParsedSunoOutput } from '../types';
 import CopyButton from './CopyButton';
