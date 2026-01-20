@@ -1,3 +1,4 @@
+
 export interface ParsedSunoOutput {
   style: string;
   title: string;
@@ -8,7 +9,6 @@ export interface ParsedSunoOutput {
   styleInfluence: number;
   lyricsWithTags: string;
   lyricsAlone: string;
-  javascriptCode: string;
   fullResponse: string;
 }
 

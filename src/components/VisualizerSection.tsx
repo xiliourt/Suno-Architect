@@ -195,7 +195,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 imageLargeUrl: fetchedData.image_large_url,
                 metadata: { tags: tags, prompt: prompt },
                 originalData: currentClip?.originalData || {
-                    style: tags, title: fetchedData.title || '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 50, styleInfluence: 50, lyricsWithTags: prompt, lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(), javascriptCode: '', fullResponse: ''
+                    style: tags, title: fetchedData.title || '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 50, styleInfluence: 50, lyricsWithTags: prompt, lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(), fullResponse: ''
                 },
                 alignmentData: currentClip?.alignmentData 
             };

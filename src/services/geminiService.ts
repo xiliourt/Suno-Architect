@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { ParsedSunoOutput, AlignedWord, FileContext } from "../types";
 import { GET_STRICT_OUTPUT_SUFFIX } from "../constants";
@@ -127,7 +128,6 @@ const constructParsedOutput = (matches: string[], rawText: string): ParsedSunoOu
     styleInfluence: 50,
     lyricsWithTags: cleanTrailingHyphens(matches[4] || ""),
     lyricsAlone: cleanTrailingHyphens(matches[5] || ""),
-    javascriptCode: "",
     fullResponse: rawText,
   };
 
@@ -156,64 +156,7 @@ const constructParsedOutput = (matches: string[], rawText: string): ParsedSunoOu
     });
   }
 
-  result.javascriptCode = generateJsCode(result);
   return result;
-};
-
-export const generateJsCode = (data: ParsedSunoOutput): string => {
-    return `
-function setNativeValue(element, value) {
-    if (!element) return;
-    const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-    const prototype = Object.getPrototypeOf(element);
-    const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, "value").set;
-    if (valueSetter && valueSetter !== prototypeValueSetter) { prototypeValueSetter.call(element, value); } else { valueSetter.call(element, value); }
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-}
-function adjustSlider(sliderText, targetValue) {
-    const slider = document.querySelector(\`div[role="slider"][aria-label="\${sliderText}"]\`);
-    if (slider) {
-        slider.focus();
-        const pressKey = (key) => {
-            slider.dispatchEvent(new KeyboardEvent('keydown', { key: key, code: key, bubbles: true, cancelable: true }));
-        };
-        if (slider.dataset.intervalId) clearInterval(slider.dataset.intervalId);
-        const interval = setInterval(() => {
-            const currentVal = parseFloat(slider.getAttribute('aria-valuenow'));
-            if (Math.abs(currentVal - targetValue) < 1) { clearInterval(interval); return; }
-            if (currentVal > targetValue) { pressKey('ArrowLeft'); } 
-            else if (currentVal < targetValue) { pressKey('ArrowRight'); } 
-        }, 10);
-        slider.dataset.intervalId = interval;
-    }
-}
-function setVocalGender(targetGender) {
-    const buttons = document.querySelectorAll('button');
-    for (const btn of buttons) {
-        const internalSpan = btn.querySelector('span.relative.flex.flex-row.items-center.justify-center.gap-1');
-        if (!internalSpan) continue;
-        const label = internalSpan.textContent.trim();
-        if (label === 'Male' || label === 'Female') {
-            const isSelected = btn.getAttribute('data-selected') === 'true';
-            let shouldBeSelected = false;
-            if (targetGender === 'Male' && label === 'Male') shouldBeSelected = true;
-            else if (targetGender === 'Female' && label === 'Female') shouldBeSelected = true;
-            if (isSelected !== shouldBeSelected) { btn.click(); }
-        }
-    }
-}
-const lyricsBlock = document.querySelector('textarea[placeholder="Write some lyrics or a prompt — or leave blank for instrumental"]');
-setNativeValue(lyricsBlock, ${JSON.stringify(data.lyricsWithTags)});
-const stylesBlock = document.querySelectorAll('textarea')[1];
-setNativeValue(stylesBlock, ${JSON.stringify(data.style)});
-const excludeStyles = document.querySelector('input[placeholder="Exclude styles"]');
-setNativeValue(excludeStyles, ${JSON.stringify(data.excludeStyles)});
-const songTitle = document.querySelector('input[placeholder="Song Title (Optional)"]');
-setNativeValue(songTitle, ${JSON.stringify(data.title)});
-adjustSlider('Weirdness', ${data.weirdness}); 
-adjustSlider('Style Influence', ${data.styleInfluence});
-setVocalGender('${data.vocalGender}');
-`;
 };
 
 const cleanTrailingHyphens = (text: string): string => {

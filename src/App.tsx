@@ -112,7 +112,6 @@ const App: React.FC = () => {
                     styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
                     lyricsWithTags: prompt,
                     lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(),
-                    javascriptCode: '',
                     fullResponse: ''
                 };
 
@@ -190,7 +189,6 @@ const App: React.FC = () => {
                     styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
                     lyricsWithTags: prompt,
                     lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(),
-                    javascriptCode: '',
                     fullResponse: ''
                 };
 

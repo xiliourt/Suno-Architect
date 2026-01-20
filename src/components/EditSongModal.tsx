@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
 import { ParsedSunoOutput } from '../types';
-import { stripMetaTags, generateJsCode } from '../services/geminiService';
+import { stripMetaTags } from '../services/geminiService';
 
 interface EditSongModalProps {
   isOpen: boolean;
@@ -29,11 +30,9 @@ const EditSongModal: React.FC<EditSongModalProps> = ({ isOpen, onClose, onSave, 
     // Auto-update clean lyrics
     const newLyricsAlone = stripMetaTags(data.lyricsWithTags);
     
-    // Generate new JS code snippet
     const newData = { ...data, lyricsAlone: newLyricsAlone };
-    const newJsCode = generateJsCode(newData);
     
-    onSave({ ...newData, javascriptCode: newJsCode });
+    onSave({ ...newData });
     onClose();
   };
 
