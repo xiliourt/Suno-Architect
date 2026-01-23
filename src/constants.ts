@@ -305,4 +305,5 @@ ${STATIC_KB_V3}
 * If generating an album, ensure thematic consistency across tracks while varying tempos and keys.
 * If the user provides context, adapt the tone accordingly.
 * Do not use [cite] tags.
+* Use [tags] in lyrics to influence sound
 `;
