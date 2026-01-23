@@ -3,7 +3,7 @@ import InputSection from './components/InputSection';
 import OutputSection from './components/OutputSection';
 import { Header } from './components/Header';
 import { generateSunoPrompt } from './services/geminiService';
-import { GenerationState, SunoClip, ParsedSunoOutput, PromptSetting
+import { GenerationState, SunoClip, ParsedSunoOutput, PromptSetting }
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import InputSection from './components/InputSection';
 import OutputSection from './components/OutputSection';
