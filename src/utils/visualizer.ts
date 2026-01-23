@@ -485,12 +485,23 @@ export const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
 export const stripMetaTags = (text: string): string => {
     if (!text) return "";
     
-    // Split by lines first to handle line-specific logic
-    const lines = text.split('\n');
+    // Normalize line endings to avoid split issues
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalized.split('\n');
     const resultLines: string[] = [];
     
     for (let i = 0; i < lines.length; i++) {
         const originalLine = lines[i];
+        const trimmedOriginal = originalLine.trim();
+
+        // Check if line is empty (stanza break)
+        if (trimmedOriginal.length === 0) {
+            // Preserve stanza break if previous line wasn't a break
+            if (resultLines.length > 0 && resultLines[resultLines.length - 1] !== "") {
+                resultLines.push("");
+            }
+            continue;
+        }
         
         // Remove tags: [..] and {..} using non-greedy match
         const cleanLine = originalLine
@@ -498,24 +509,13 @@ export const stripMetaTags = (text: string): string => {
             .replace(/\{.*?\}/g, '')
             .trim();
         
-        const isOriginalEmpty = originalLine.trim().length === 0;
-        const isCleanEmpty = cleanLine.length === 0;
-
-        // 1. If line was ORIGINALLY empty, preserve it as a stanza break (max 1 empty line)
-        if (isOriginalEmpty) {
-            if (resultLines.length > 0 && resultLines[resultLines.length - 1] !== "") {
-                resultLines.push("");
-            }
-        } 
-        // 2. If line had content (tags) but is NOW empty, it was a meta-tag line. 
-        // We SKIP it completely to avoid creating unintended blank lines.
-        else if (isCleanEmpty) {
+        // If line became empty ONLY after removing tags, it was a meta-tag line. 
+        // We SKIP it entirely to avoid creating unintended blank lines.
+        if (cleanLine.length === 0) {
             continue;
         }
-        // 3. Otherwise, it's lyric content
-        else {
-            resultLines.push(cleanLine);
-        }
+
+        resultLines.push(cleanLine);
     }
     
     // Remove trailing empty line if exists
