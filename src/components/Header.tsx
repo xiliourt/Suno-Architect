@@ -146,7 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
           <h1 className="text-xl font-bold tracking-tight text-white">
             Suno <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">Architect</span>
           </h1>
-          <p className="text-xs text-slate-400 font-medium">Powered by Gemini 2.5 Flash</p>
+          <p className="text-xs text-slate-400 font-medium">Version 1.0.1 - Refactor</p>
         </div>
       </div>
       

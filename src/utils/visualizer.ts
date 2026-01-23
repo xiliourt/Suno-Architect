@@ -484,26 +484,41 @@ export const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
 
 export const stripMetaTags = (text: string): string => {
     if (!text) return "";
-    let clean = text
-        .replace(/\[[\s\S]*?\]/g, '') // Remove [tags]
-        .replace(/\{[\s\S]*?\}/g, ''); // Remove {tags}
     
-    const lines = clean.split('\n').map(line => line.trim());
+    // Split by lines first to handle line-specific logic
+    const lines = text.split('\n');
     const resultLines: string[] = [];
     
     for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (line.length > 0) {
-            resultLines.push(line);
-        } else {
-            // Keep empty line if it acts as a separator (max 1 consecutive empty line)
+        const originalLine = lines[i];
+        
+        // Remove tags: [..] and {..} using non-greedy match
+        const cleanLine = originalLine
+            .replace(/\[.*?\]/g, '') 
+            .replace(/\{.*?\}/g, '')
+            .trim();
+        
+        const isOriginalEmpty = originalLine.trim().length === 0;
+        const isCleanEmpty = cleanLine.length === 0;
+
+        // 1. If line was ORIGINALLY empty, preserve it as a stanza break (max 1 empty line)
+        if (isOriginalEmpty) {
             if (resultLines.length > 0 && resultLines[resultLines.length - 1] !== "") {
                 resultLines.push("");
             }
+        } 
+        // 2. If line had content (tags) but is NOW empty, it was a meta-tag line. 
+        // We SKIP it completely to avoid creating unintended blank lines.
+        else if (isCleanEmpty) {
+            continue;
+        }
+        // 3. Otherwise, it's lyric content
+        else {
+            resultLines.push(cleanLine);
         }
     }
     
-    // If the last line is empty, remove it
+    // Remove trailing empty line if exists
     if (resultLines.length > 0 && resultLines[resultLines.length - 1] === "") {
         resultLines.pop();
     }
