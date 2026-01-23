@@ -127,8 +127,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
                         styleInfluence: 0,
                         lyricsWithTags: metadata.prompt || '',
                         lyricsAlone: (metadata.prompt || '').replace(/\[[\s\S]*?\]/g, "").trim(),
-                        fullResponse: '',
-                        javascriptCode: ''
+                        fullResponse: ''
                   }
               };
               onAddClip(clip);
@@ -147,7 +146,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
       const clean = stripMetaTags(editedLyrics);
       
       const baseOriginal = selectedClip.originalData || {
-         style: '', title: '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 0, styleInfluence: 0, lyricsWithTags: '', lyricsAlone: '', fullResponse: '', javascriptCode: ''
+         style: '', title: '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 0, styleInfluence: 0, lyricsWithTags: '', lyricsAlone: '', fullResponse: ''
       };
 
       const updates: Partial<SunoClip> = {
@@ -221,7 +220,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
       // Save the edited lyrics used for generation
       const clean = stripMetaTags(sourceText);
       const baseOriginal = selectedClip.originalData || {
-            style: '', title: '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 0, styleInfluence: 0, lyricsWithTags: '', lyricsAlone: '', fullResponse: '', javascriptCode: ''
+            style: '', title: '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 0, styleInfluence: 0, lyricsWithTags: '', lyricsAlone: '', fullResponse: ''
       };
         
       updates.originalData = {
@@ -273,7 +272,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, 
       // Save edited lyrics
       const clean = stripMetaTags(sourceText);
       const baseOriginal = selectedClip.originalData || {
-            style: '', title: '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 0, styleInfluence: 0, lyricsWithTags: '', lyricsAlone: '', fullResponse: '', javascriptCode: ''
+            style: '', title: '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 0, styleInfluence: 0, lyricsWithTags: '', lyricsAlone: '', fullResponse: ''
       };
       updates.originalData = {
             ...baseOriginal,
