@@ -1,3 +1,4 @@
+
 import { SunoLibrary, LyricalConstraints } from "./types";
 
 export const SUNO_MODEL_MAPPINGS = [
@@ -22,6 +23,28 @@ export const DEFAULT_LYRICAL_CONSTRAINTS: LyricalConstraints = {
   forbiddenPhrases: ["ghost in the machine", "rise from the ashes", "broken wings", "dance with the devil", "weight of the world", "heart of gold", "lost in the dark", "find the light", "walls come crashing down", "demons inside", "fire and ice", "bleeding heart", "written in the stars", "against all odds", "eye of the storm", "chasing dreams"],
   forbiddenRhymes: "fire/desire, heart/apart/start, night/light/fight/sight, pain/rain/vain, soul/whole/control, time/mind/blind, stay/away/day, breath/death, eyes/lies/skies, burn/turn/learn, fall/all/wall, tears/fears/years"
 };
+
+export const ASPECT_RATIOS = {
+  "16:9": { width: 1280, height: 720, label: "Landscape (16:9)" },
+  "9:16": { width: 720, height: 1280, label: "Portrait/TikTok (9:16)" },
+  "1:1": { width: 1080, height: 1080, label: "Square (1:1)" },
+  "4:3": { width: 1024, height: 768, label: "Classic (4:3)" }
+};
+
+export const AUDIO_BITRATES = [
+    { label: "128 kbps (Standard)", value: 128000 },
+    { label: "192 kbps (High)", value: 192000 },
+    { label: "256 kbps (Very High)", value: 256000 },
+    { label: "320 kbps (Master)", value: 320000 },
+];
+
+export const VISUALIZER_FONTS = [
+    { label: "Inter (Modern Sans)", value: "Inter, sans-serif" },
+    { label: "Montserrat (Geometric)", value: "Montserrat, sans-serif" },
+    { label: "Roboto (Neutral)", value: "Roboto, sans-serif" },
+    { label: "Lora (Serif)", value: "Lora, serif" },
+    { label: "Courier Prime (Mono)", value: "'Courier Prime', monospace" },
+];
 
 /**
  * Dynamically builds the Knowledge Base string based on current settings.
@@ -166,6 +189,7 @@ ${knowledgeBase}
 4. **Meter:** Vary line lengths. Avoid symmetrical "nursery rhyme" structures.
 5. **Punctuation:** Use standard punctuation. **ABSOLUTELY NO** hyphens at the end of lines. Use periods or commas.
 6. **Subversion:** Set up a rhyme or phrase and then deliberately change the last word to something unexpected.
+7. **Prompting:** Use the users prompts for lyrics influence and styling
 
 ### PART 2: NEGATIVE CONSTRAINTS (THE "VOID" LIST)
 Do NOT use the following, as they trigger "AI-detection" in listeners:
@@ -173,4 +197,9 @@ Do NOT use the following, as they trigger "AI-detection" in listeners:
 - **Forbidden Adjectives:** ${constraints.forbiddenAdjectives.join(", ")}
 - **Forbidden Phrases:** ${constraints.forbiddenPhrases.join(", ")}
 - **Forbidden Rhymes:** ${constraints.forbiddenRhymes}
+
+### PART 3:
+- **Prompting:** Use the users prompts for lyrics influence and styling. 
+- Output style should be similiar to user suggestions 
+- Output lyrics guided by the user prompt.
 `;
