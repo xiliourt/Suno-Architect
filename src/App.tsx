@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import InputSection from './components/InputSection';
 import OutputSection from './components/OutputSection';
@@ -112,6 +111,7 @@ const App: React.FC = () => {
                     styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
                     lyricsWithTags: prompt,
                     lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(),
+                    javascriptCode: '',
                     fullResponse: ''
                 };
 
@@ -189,6 +189,7 @@ const App: React.FC = () => {
                     styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
                     lyricsWithTags: prompt,
                     lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(),
+                    javascriptCode: '',
                     fullResponse: ''
                 };
 
@@ -350,6 +351,13 @@ const App: React.FC = () => {
     });
   }, []);
 
+  const handleAddClip = useCallback((newClip: SunoClip) => {
+    setHistory(prev => {
+        if (prev.some(c => c.id === newClip.id)) return prev;
+        return [newClip, ...prev];
+    });
+  }, []);
+
   const renderContent = () => {
       switch(view) {
           case 'history':
@@ -357,6 +365,7 @@ const App: React.FC = () => {
                 <HistorySection 
                     history={history} 
                     onUpdateClip={handleUpdateClip} 
+                    onAddClip={handleAddClip}
                     sunoCookie={sunoCookie}
                     onResync={handleRefreshHistory}
                     isSyncing={isSyncingHistory}
