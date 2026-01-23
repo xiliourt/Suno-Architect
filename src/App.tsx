@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import InputSection from './components/InputSection';
-import OutputSection from './components/OutputSection';
+import InputSection from './components/InputSection/InputSection';
+import OutputSection from './components/OutputSection/OutputSection';
 import { Header } from './components/Header';
 import { generateSunoPrompt } from './services/geminiService';
 import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings, ViewMode, FileContext } from './types';
@@ -9,8 +8,8 @@ import { DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS, buildKnowledgeBase, 
 import Footer from './components/Footer';
 import SunoSettingsModal from './components/SunoSettingsModal';
 import { getSunoCredits, updateSunoMetadata, getSunoFeed } from './services/sunoApi';
-import HistorySection from './components/HistorySection';
-import VisualizerSection from './components/VisualizerSection';
+import HistorySection from './components/HistorySection/HistorySection';
+import VisualizerSection from './components/VisualizerSection/VisualizerSection';
 
 const App: React.FC = () => {
   const [state, setState] = useState<GenerationState>({
