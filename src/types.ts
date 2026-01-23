@@ -63,7 +63,7 @@ export interface LyricalConstraints {
 }
 
 export interface PromptSettings {
-  version: 'v1' | 'v2' | 'custom';
+  version: 'v1' | 'v2' | 'v3' | 'custom';
   customSystemPrompt: string;
   library: SunoLibrary;
   constraints: LyricalConstraints;
@@ -76,5 +76,3 @@ export interface FileContext {
 }
 
 export type ViewMode = 'generator' | 'history' | 'visualizer';
-
-export type Qt6Style = 'wave' | 'bars' | 'circle' | 'circular-wave';
