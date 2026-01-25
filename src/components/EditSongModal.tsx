@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ParsedSunoOutput } from '../types';
-import { stripMetaTags } from '../services/geminiService';
+import { stripMetaTags } from '../utils/visualizer';
 
 interface EditSongModalProps {
   isOpen: boolean;

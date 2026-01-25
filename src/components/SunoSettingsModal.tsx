@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import CopyButton from './CopyButton';
 import { getSunoCredits } from '../services/sunoApi';
-import { SUNO_MODEL_MAPPINGS, buildKnowledgeBase, GET_PROMPT_V1, GET_PROMPT_V2, DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS } from '../constants';
+import { SUNO_MODEL_MAPPINGS, buildKnowledgeBase, GET_PROMPT_V1, GET_PROMPT_V2, GET_PROMPT_V3, DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS } from '../constants';
 import { PromptSettings, SunoLibrary, LyricalConstraints } from '../types';
 
 interface SunoSettingsModalProps {
@@ -90,7 +91,7 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
   }, [isModelDropdownOpen]);
 
   // Handle version switching to auto-fill custom prompt if switching to a preset
-  const handleVersionChange = (newVersion: 'v1' | 'v2' | 'custom') => {
+  const handleVersionChange = (newVersion: 'v1' | 'v2' | 'v3' | 'custom') => {
       let newText = promptSettings.customSystemPrompt;
       
       const currentLib: SunoLibrary = {
@@ -114,6 +115,8 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
           newText = GET_PROMPT_V1(kb);
       } else if (newVersion === 'v2') {
           newText = GET_PROMPT_V2(kb, currentConstraints);
+      } else if (newVersion === 'v3') {
+          newText = GET_PROMPT_V3();
       }
       
       setPromptSettings(prev => ({
@@ -157,14 +160,17 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
         forbiddenRhymes: constRhymes
     };
     
-    // If we are in V1 or V2 mode, regenerate the prompt text based on the NEW library/constraints before saving
+    // If we are in V1 or V2 mode, regenerate the prompt text based on the NEW library/constraints before saving.
+    // If V3, regenerate using static.
     let finalSystemPrompt = promptSettings.customSystemPrompt;
     if (promptSettings.version !== 'custom') {
         const kb = buildKnowledgeBase(updatedLibrary);
         if (promptSettings.version === 'v1') {
             finalSystemPrompt = GET_PROMPT_V1(kb);
-        } else {
+        } else if (promptSettings.version === 'v2') {
             finalSystemPrompt = GET_PROMPT_V2(kb, updatedConstraints);
+        } else if (promptSettings.version === 'v3') {
+            finalSystemPrompt = GET_PROMPT_V3();
         }
     }
 
@@ -364,43 +370,50 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
                              <p className="text-xs text-slate-400">Select which instruction set the AI uses.</p>
                          </div>
                          <div className="flex bg-slate-900 p-1 rounded-lg">
-                             {(['v1', 'v2', 'custom'] as const).map(v => (
+                             {(['v1', 'v2', 'v3', 'custom'] as const).map(v => (
                                  <button
                                     key={v}
                                     onClick={() => handleVersionChange(v)}
                                     className={`px-4 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${promptSettings.version === v ? 'bg-purple-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                                  >
-                                     {v === 'v2' ? 'V2 (Lyrical)' : v === 'v1' ? 'V1 (Classic)' : 'Custom'}
+                                     {v === 'v2' ? 'V2 (Lyrical)' : v === 'v1' ? 'V1 (Classic)' : v === 'v3' ? 'V3 (Detailed)' : 'Custom'}
                                  </button>
                              ))}
                          </div>
                     </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        {/* 2. Library Configuration */}
-                        <div className="space-y-4">
-                            <div className="flex justify-between items-center">
-                                <h3 className="text-sm font-bold text-purple-400 uppercase tracking-wider">Suno Library</h3>
-                                <button onClick={handleResetDefaults} className="text-xs text-red-400 hover:text-red-300 hover:underline">Reset Defaults</button>
-                            </div>
-                            
-                            <div className="space-y-3">
-                                <ConfigArea label="Genres" value={libGenres} onChange={setLibGenres} />
-                                <ConfigArea label="Structures" value={libStructures} onChange={setLibStructures} />
-                                <ConfigArea label="Vocal Styles" value={libVocals} onChange={setLibVocals} />
-                                <ConfigArea label="Production" value={libProduction} onChange={setLibProduction} />
-                                <ConfigArea label="Music Theory" value={libTheory} onChange={setLibTheory} />
-                            </div>
-                        </div>
+                    {/* 2 & 3. Library & Constraints (Hidden if V3) */}
+                    {promptSettings.version !== 'v3' && (
+                        <>
+                            <div className={`grid grid-cols-1 ${promptSettings.version !== 'v1' ? 'lg:grid-cols-2' : ''} gap-8`}>
+                                {/* Library Configuration */}
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-center">
+                                        <h3 className="text-sm font-bold text-purple-400 uppercase tracking-wider">Suno Library</h3>
+                                        <button onClick={handleResetDefaults} className="text-xs text-red-400 hover:text-red-300 hover:underline">Reset Defaults</button>
+                                    </div>
+                                    
+                                    <div className="space-y-3">
+                                        <ConfigArea label="Genres" value={libGenres} onChange={setLibGenres} />
+                                        <ConfigArea label="Structures" value={libStructures} onChange={setLibStructures} />
+                                        <ConfigArea label="Vocal Styles" value={libVocals} onChange={setLibVocals} />
+                                        <ConfigArea label="Production" value={libProduction} onChange={setLibProduction} />
+                                        <ConfigArea label="Music Theory" value={libTheory} onChange={setLibTheory} />
+                                    </div>
+                                </div>
 
-                         {/* 3. Constraints Configuration */}
-                        <div className="space-y-4">
-                            <h3 className="text-sm font-bold text-red-400 uppercase tracking-wider">Lyrical Constraints</h3>
-                            <div className="space-y-3">
-                                <ConfigArea label="Forbidden Words" value={constForbidden} onChange={setConstForbidden} />
-                                <ConfigArea label="Forbidden Adjectives" value={constAdjectives} onChange={setConstAdjectives} />
-                                <ConfigArea label="Forbidden Phrases" value={constPhrases} onChange={setConstPhrases} />
-                                <ConfigArea label="Forbidden Rhymes" value={constRhymes} onChange={setConstRhymes} />
+                                {/* Constraints Configuration - Hidden for V1 */}
+                                {promptSettings.version !== 'v1' && (
+                                    <div className="space-y-4">
+                                        <h3 className="text-sm font-bold text-red-400 uppercase tracking-wider">Lyrical Constraints</h3>
+                                        <div className="space-y-3">
+                                            <ConfigArea label="Forbidden Words" value={constForbidden} onChange={setConstForbidden} />
+                                            <ConfigArea label="Forbidden Adjectives" value={constAdjectives} onChange={setConstAdjectives} />
+                                            <ConfigArea label="Forbidden Phrases" value={constPhrases} onChange={setConstPhrases} />
+                                            <ConfigArea label="Forbidden Rhymes" value={constRhymes} onChange={setConstRhymes} />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                             
                             <div className="mt-6 p-4 bg-purple-900/20 border border-purple-500/20 rounded-xl">
@@ -411,8 +424,19 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
                                     Selecting "Custom" preserves your edits.
                                 </p>
                             </div>
+                        </>
+                    )}
+
+                    {/* Information Box for V3 */}
+                    {promptSettings.version === 'v3' && (
+                         <div className="p-4 bg-blue-900/20 border border-blue-500/20 rounded-xl">
+                            <h4 className="text-xs font-bold text-blue-300 mb-2">Extended Knowledge Base Active</h4>
+                            <p className="text-xs text-slate-400 leading-relaxed">
+                                V3 uses a comprehensive, static knowledge base covering advanced parameters, extensive genre lists, and specific prompting strategies. 
+                                Library customisation is disabled in this mode to ensure prompt consistency with the knowledge base.
+                            </p>
                         </div>
-                    </div>
+                    )}
 
                     {/* 4. Full Prompt Editor */}
                     <div className="space-y-2">
