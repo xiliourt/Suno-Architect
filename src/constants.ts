@@ -274,13 +274,14 @@ Define the architectural flow of the track.
 ## 13. Advanced Parameters (System Control)
 * **Exclude Styles:** List elements to strictly avoid (e.g., "Exclude: Electric Guitar, Male Vocal").
 * **Vocal Gender:** Explicitly set "Male" or "Female".
-* **Weirdness (0-100%):**
-    * *0-30%*: Safe, conventional, commercial.
-    * *40-60%*: Balanced (Standard setting).
-    * *70-100%*: Experimental, chaotic, avant-garde.
-* **Style Influence (0-100%):**
-    * *0-30%*: Loose interpretation.
-    * *70-100%*: Strict adherence to tags.
+* **Weirdness (0-80%):**
+    * *0-25%*: Safe, conventional, commercial.
+    * *25-50%*: Balanced (Standard setting).
+    * *50-75%*: Experimental, chaotic, avant-garde.
+* **Style Influence (0-90%):**
+    * 0-30% (Loose): Suggestions only.
+    * 40-65% (Balanced): Default recommendation.
+    * 70-90% (Strict): Required for complex timing (e.g., "7/8 time") or sub-genres.
 
 ## 14. Prompting Strategy
 * **Layering:** Combine \`[Genre]\` + \`[Mood]\` + \`[Tempo]\` + \`[Production]\` for the Style field.
