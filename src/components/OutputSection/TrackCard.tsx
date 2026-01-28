@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { ParsedSunoOutput } from '../../types';
 import CopyButton from '../CopyButton';
@@ -98,12 +99,13 @@ const TrackCard: React.FC<TrackCardProps> = ({ data, index, totalTracks, status,
                         {sunoCookie && (
                             <button
                                 onClick={onSync}
-                                disabled={status.loading || status.success}
+                                disabled={status.loading}
+                                title={status.success ? "Sync again (creates new generation)" : "Sync to Suno"}
                                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 border flex items-center space-x-2
                                 ${status.loading 
                                     ? 'bg-pink-600/50 border-pink-500/50 text-white cursor-wait' 
                                     : status.success
-                                        ? 'bg-green-600/20 border-green-500/30 text-green-400'
+                                        ? 'bg-green-600/20 border-green-500/30 text-green-400 hover:bg-green-600/30 hover:border-green-500/50 hover:text-green-300'
                                         : 'bg-pink-700/80 border-pink-600 text-pink-100 hover:bg-pink-600'}`}
                             >
                                 {status.loading ? (
