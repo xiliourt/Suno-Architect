@@ -1,3 +1,4 @@
+
 import { AlignedWord, Qt6Style } from '../types';
 import { Type, GoogleGenAI } from "@google/genai";
 
@@ -445,85 +446,102 @@ export const drawScrollingLyrics = (
 
 export const STOP_WORDS = new Set(['the', 'and', 'a', 'to', 'of', 'in', 'it', 'is', 'that', 'you', 'he', 'she', 'was', 'for', 'on', 'are', 'as', 'with', 'his', 'they', 'at', 'be', 'this', 'have', 'from', 'or', 'one', 'had', 'by', 'word', 'but', 'not', 'what', 'all', 'were', 'we', 'when', 'your', 'can', 'said', 'there', 'use', 'an', 'each', 'which', 'she', 'do', 'how', 'their', 'if', 'will', 'up', 'other', 'about', 'out', 'many', 'then', 'them', 'these', 'so', 'some', 'her', 'would', 'make', 'like', 'him', 'into', 'time', 'has', 'look', 'two', 'more', 'write', 'go', 'see', 'number', 'no', 'way', 'could', 'people', 'my', 'than', 'first', 'water', 'been', 'call', 'who', 'oil', 'its', 'now', 'find']);
 
-export const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
-    const clean: AlignedWord[] = [];
-    let bracketDepth = 0;
-    for (const w of aligned) {
-        const originalWord = w.word;
-        let cleanWordBuilder = "";
-        for (let i = 0; i < originalWord.length; i++) {
-            const char = originalWord[i];
-            if (char === '[') { bracketDepth++; continue; }
-            if (char === ']') { if (bracketDepth > 0) bracketDepth--; continue; }
-            if (bracketDepth === 0) cleanWordBuilder += char;
-        }
-        const trimmed = cleanWordBuilder.trim();
-        if (trimmed.length > 0) {
-            clean.push({ ...w, word: trimmed });
-        }
-    }
-    if (clean.length === 0) return [];
-    const fixed: AlignedWord[] = [];
-    let current = clean[0];
-    for (let i = 1; i < clean.length; i++) {
-            const next = clean[i];
-            const currText = current.word.trim();
-            const nextText = next.word.trim();
-            const isFragment = /['’]$/.test(currText) || /^['’]/.test(nextText) || /^['’]+$/.test(currText) || /^['’]+$/.test(nextText);
-            const gap = next.start_s - current.end_s;
-            if (isFragment && gap < 0.5) {
-                current = { ...current, word: currText + nextText, end_s: next.end_s };
-            } else {
-                fixed.push(current);
-                current = next;
-            }
-    }
-    fixed.push(current);
-    return fixed;
-};
-
 export const stripMetaTags = (text: string): string => {
     if (!text) return "";
-    
-    // Normalize line endings to avoid split issues
-    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    const lines = normalized.split('\n');
-    const resultLines: string[] = [];
-    
-    for (let i = 0; i < lines.length; i++) {
-        const originalLine = lines[i];
-        const trimmedOriginal = originalLine.trim();
+    // Regex to match [ ... ] and { ... } including newlines
+    return text
+        .replace(/\[[^\]]*\]/g, "")
+        .replace(/\{[^}]*\}/g, "")
+        .replace(/\n{3,}/g, "\n\n") // Normalize excessive newlines
+        .trim();
+};
 
-        // Check if line is empty (stanza break)
-        if (trimmedOriginal.length === 0) {
-            // Preserve stanza break if previous line wasn't a break
-            if (resultLines.length > 0 && resultLines[resultLines.length - 1] !== "") {
-                resultLines.push("");
+export const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
+    // 1. Stateful Strip of Square Brackets [] and Curly Braces {}
+    // This handles cases where tags are split across multiple tokens like "[", "Intro", "]"
+    const stripped: AlignedWord[] = [];
+    let inSquare = false;
+    let inCurly = false;
+
+    for (const w of aligned) {
+        let cleanedWord = "";
+        for (const char of w.word) {
+            if (char === '[') { inSquare = true; continue; }
+            if (char === ']') { inSquare = false; continue; }
+            if (char === '{') { inCurly = true; continue; }
+            if (char === '}') { inCurly = false; continue; }
+
+            if (!inSquare && !inCurly) {
+                cleanedWord += char;
             }
-            continue;
         }
         
-        // Remove tags: [..] and {..} using non-greedy match
-        const cleanLine = originalLine
-            .replace(/\[.*?\]/g, '') 
-            .replace(/\{.*?\}/g, '')
-            .trim();
+        // Use the original start/end times even if word is shortened
+        // If word becomes empty (whitespace), we drop it.
+        const trimmed = cleanedWord.trim();
+        if (trimmed.length > 0) {
+            stripped.push({ ...w, word: trimmed });
+        }
+    }
+
+    if (stripped.length === 0) return [];
+
+    // 2. Smart Merge of Punctuation (Parentheses, Quotes, etc.)
+    const merged: AlignedWord[] = [];
+    
+    // Regex for openers that should stick to the NEXT word: ( " ' <
+    const isOpener = (s: string) => /^[\(\"\'\u201C\u2018\u00AB\<]+$/.test(s); 
+    // Regex for closers that should stick to the PREVIOUS word: ) " ' > , . ! ? : ;
+    const isCloser = (s: string) => /^[\)\"\'\u201D\u2019\u00BB\>\,\.\!\?\:\;]+$/.test(s);
+    // Suffixes: 's 't 're 've 'll 'd (starts with apostrophe)
+    const isSuffix = (s: string) => /^['’][a-z]+$/i.test(s);
+    
+    // Contraction parts (without apostrophe, e.g. "s" in "That'" + "s")
+    const isContractionPart = (s: string) => /^(s|m|t|re|ve|ll|d)$/i.test(s);
+
+    for (let i = 0; i < stripped.length; i++) {
+        let current = { ...stripped[i] };
         
-        // If line became empty ONLY after removing tags, it was a meta-tag line. 
-        // We SKIP it entirely to avoid creating unintended blank lines.
-        if (cleanLine.length === 0) {
-            continue;
+        // A. Forward Merge (Openers)
+        // If current is purely an opener, try to merge with next
+        if (isOpener(current.word) && i + 1 < stripped.length) {
+            const next = stripped[i+1];
+            // Merge if gap is small (< 1.5s to be safe, prevents merging across long pauses)
+            if (next.start_s - current.end_s < 1.5) {
+                stripped[i+1] = {
+                    ...next,
+                    word: current.word + next.word,
+                    start_s: current.start_s // Extend start time
+                };
+                continue; // Skip adding current, it's merged
+            }
         }
 
-        resultLines.push(cleanLine);
+        // B. Backward Merge (Closers & Suffixes & Split Contractions)
+        if (merged.length > 0) {
+            const prev = merged[merged.length - 1];
+            const timeGap = current.start_s - prev.end_s;
+            
+            // Logic to determine if we should merge backward
+            const standardMerge = (isCloser(current.word) || isSuffix(current.word));
+            
+            // Check for split contraction: prev ends with ' and current is s, m, etc.
+            const splitContractionMerge = /['’]$/.test(prev.word) && isContractionPart(current.word);
+
+            if ((standardMerge || splitContractionMerge) && timeGap < 1.5) {
+                merged[merged.length - 1] = {
+                    ...prev,
+                    word: prev.word + current.word,
+                    end_s: current.end_s // Extend end time
+                };
+                continue; // Skip adding current
+            }
+        }
+
+        merged.push(current);
     }
-    
-    // Remove trailing empty line if exists
-    if (resultLines.length > 0 && resultLines[resultLines.length - 1] === "") {
-        resultLines.pop();
-    }
-    
-    return resultLines.join('\n');
+
+    return merged;
 };
 
 export const cleanStringForMatch = (s: string) => {
@@ -549,7 +567,7 @@ export const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
         const currentLen = currentLine.reduce((sum, w) => sum + w.word.length + 1, 0);
         const isGapBig = timeGap > GAP_THRESHOLD;
         const isLineLong = currentLen > MAX_CHARS;
-        const endsClause = /[.,;!?]$/.test(prevWord.word);
+        const endsClause = /[.,;!?\)]$/.test(prevWord.word);
         if (isGapBig || ((isLineLong || endsClause) && timeGap > 0.15)) {
             groups.push(currentLine);
             currentLine = [word];
@@ -566,55 +584,117 @@ export const matchWordsToPrompt = (aligned: AlignedWord[], promptText: string): 
     if (cleanAligned.length === 0) return [];
     const promptLines = stripMetaTags(promptText).split('\n').map(l => l.trim()).filter(l => l.length > 0);
     if (promptLines.length === 0) return groupWordsByTiming(cleanAligned);
+    
     type PromptToken = { text: string; lineIndex: number; isLineStart: boolean };
     const tokens: PromptToken[] = [];
     promptLines.forEach((line, idx) => {
         const words = line.split(/\s+/).map(cleanStringForMatch).filter(w => w.length > 0);
         words.forEach((w, wIdx) => tokens.push({ text: w, lineIndex: idx, isLineStart: wIdx === 0 }));
     });
+    
     const groups: AlignedWord[][] = [];
     let currentGroup: AlignedWord[] = [];
     let currentLineIndex = 0;
     let tokenPtr = 0;
     let wordsSinceLastMatch = 0; 
+    
     for (let i = 0; i < cleanAligned.length; i++) {
         const wordObj = cleanAligned[i];
         const cleanWord = cleanStringForMatch(wordObj.word);
-        if (!cleanWord) { currentGroup.push(wordObj); continue; }
+        
+        if (!cleanWord) { 
+            currentGroup.push(wordObj); 
+            continue; 
+        }
+
         let bestMatchOffset = -1;
-        const isLost = wordsSinceLastMatch > 4; 
-        const MAX_LOOKAHEAD = isLost ? 1000 : 200; 
-        const searchLimit = Math.min(tokens.length - tokenPtr, MAX_LOOKAHEAD);
+        // Reducing tolerance to avoid skipping large chunks erroneously
+        const isLost = wordsSinceLastMatch > 3; 
+        const searchLimit = isLost ? 500 : 50; 
+
+        // Check ahead for a match
         for (let lookahead = 0; lookahead < searchLimit; lookahead++) {
+            if (tokenPtr + lookahead >= tokens.length) break;
             const target = tokens[tokenPtr + lookahead];
-            const isMatch = target.text === cleanWord || (!isLost && (target.text.includes(cleanWord) || cleanWord.includes(target.text)));
+            
+            const isExact = target.text === cleanWord;
+            const isSub = !isExact && (target.text.includes(cleanWord) || cleanWord.includes(target.text));
+            const isMatch = isExact || (isLost && isSub);
+
             if (isMatch) {
-                let contextMatch = false;
+                // Verify context to confirm this is a real match and not a random common word
+                let contextScore = 0;
+                
                 if (i + 1 < cleanAligned.length) {
                     const nextAudio = cleanStringForMatch(cleanAligned[i+1].word);
-                    if (nextAudio) {
-                            for (let offset = 1; offset <= 3; offset++) {
-                                if (tokenPtr + lookahead + offset < tokens.length) {
-                                    const nextToken = tokens[tokenPtr + lookahead + offset].text;
-                                    if (nextToken === nextAudio || nextToken.includes(nextAudio) || nextAudio.includes(nextToken)) { contextMatch = true; break; }
-                                }
-                            }
-                    } else { contextMatch = true; }
+                    // Check next token
+                    if (tokenPtr + lookahead + 1 < tokens.length) {
+                        const nextToken = tokens[tokenPtr + lookahead + 1].text;
+                        if (nextToken === nextAudio) contextScore += 2;
+                        else if (nextAudio && nextToken.includes(nextAudio)) contextScore += 1;
+                    }
+                    // Check +2 token for robustness
+                    if (i + 2 < cleanAligned.length && tokenPtr + lookahead + 2 < tokens.length) {
+                         const nextNextAudio = cleanStringForMatch(cleanAligned[i+2].word);
+                         const nextNextToken = tokens[tokenPtr + lookahead + 2].text;
+                         if (nextNextAudio === nextNextToken) contextScore += 1;
+                    }
                 }
-                if (lookahead < 3 || contextMatch) { bestMatchOffset = lookahead; break; }
-                if (isLost && !STOP_WORDS.has(cleanWord) && target.text === cleanWord) {
-                        if (target.isLineStart || lookahead < 20) { bestMatchOffset = lookahead; break; }
+
+                // If exact match at lookahead 0, we trust it. 
+                // Otherwise we need context score OR it must be a unique word (not stop word)
+                // OR it must be a start of a line which is a strong signal
+                const isStrongMatch = (isExact && lookahead === 0) || contextScore > 0;
+                
+                // Prioritize line starts to fix bunching issues
+                if (target.isLineStart && (isStrongMatch || (isExact && !STOP_WORDS.has(cleanWord)))) {
+                    bestMatchOffset = lookahead;
+                    break;
+                }
+
+                if (isStrongMatch) {
+                    bestMatchOffset = lookahead;
+                    break;
+                }
+                
+                // Fallback for lost state: Accept exact match if it's not a stop word
+                if (isLost && isExact && !STOP_WORDS.has(cleanWord)) {
+                     if (bestMatchOffset === -1) bestMatchOffset = lookahead;
                 }
             }
         }
+
         if (bestMatchOffset !== -1) {
             const target = tokens[tokenPtr + bestMatchOffset];
-            if (target.lineIndex > currentLineIndex) { if (currentGroup.length > 0) groups.push(currentGroup); currentGroup = []; currentLineIndex = target.lineIndex; }
+            
+            // Advance Line Logic
+            if (target.lineIndex > currentLineIndex) {
+                if (currentGroup.length > 0) groups.push(currentGroup);
+                currentGroup = [];
+                currentLineIndex = target.lineIndex;
+            } 
+            // Note: We ignore backward line jumps to prevent loops, effectively skipping words that would go back.
+
             tokenPtr += bestMatchOffset + 1;
             wordsSinceLastMatch = 0; 
-        } else { wordsSinceLastMatch++; }
+        } else {
+            wordsSinceLastMatch++;
+            
+            // Time Gap Fallback: If we didn't match text, but there's a huge silence, force a visual break
+            // This prevents "bunching" where a whole verse gets stuck to the previous line because match failed
+            if (currentGroup.length > 0) {
+                const prev = currentGroup[currentGroup.length - 1];
+                // 2.0s gap is massive in lyrics, safe to assume a visual break is needed
+                if (wordObj.start_s - prev.end_s > 2.0) { 
+                     groups.push(currentGroup);
+                     currentGroup = [];
+                }
+            }
+        }
+        
         currentGroup.push(wordObj);
     }
+    
     if (currentGroup.length > 0) groups.push(currentGroup);
     return groups;
 };
