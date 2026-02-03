@@ -13,7 +13,7 @@
 - **OPTIONAL:** Utilises Suno API
   - Requires an easily obtainable token (which may expire at times)
   - Adds a button to send directly to the Suno API
-  - Saves ID in 'history' tab to display image(s), links to suno tracks, download buttons, etc
+  - Saves ID in 'history' tab to display image(s), links to suno tracks, download buttons, song metadata (BPM, explicit, prompt details), etc
   - Support for pulling the timed lyrics from Suno
   - Support for conversion of timed lyrics JSON to LRC or SRT
   - NOTE: _For some reason the main generation API is cors locked, requiring the worker. The rest is direct via browser)_
