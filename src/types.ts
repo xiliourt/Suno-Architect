@@ -1,4 +1,5 @@
 
+
 export interface ParsedSunoOutput {
   style: string;
   title: string;
@@ -25,9 +26,16 @@ export interface SunoClip {
   model_name: string;
   imageUrl?: string;
   imageLargeUrl?: string;
+  explicit?: boolean;
   metadata: {
     tags: string;
     prompt: string;
+    negative_tags?: string;
+    duration?: number;
+    max_bpm?: number;
+    min_bpm?: number;
+    avg_bpm?: number;
+    key?: string;
   };
   originalData?: ParsedSunoOutput;
   alignmentData?: AlignedWord[];
@@ -76,3 +84,5 @@ export interface FileContext {
 }
 
 export type ViewMode = 'generator' | 'history' | 'visualizer';
+
+export type Qt6Style = 'wave' | 'bars' | 'circle' | 'circular-wave';

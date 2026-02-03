@@ -11,7 +11,49 @@ import SunoSettingsModal from './components/SunoSettingsModal';
 import { getSunoCredits, updateSunoMetadata, getSunoFeed } from './services/sunoApi';
 import HistorySection from './components/HistorySection/HistorySection';
 import VisualizerSection from './components/VisualizerSection/VisualizerSection';
-import { stripMetaTags } from './utils/visualizer';
+import { stripMetaTags } from './utils/lyrics';
+
+// Helper to map API response to SunoClip
+const mapSunoClip = (clip: any): SunoClip => {
+    const metadata = clip.metadata || {};
+    const tags = metadata.tags || '';
+    const prompt = metadata.prompt || '';
+    const title = clip.title || 'Untitled';
+
+    const originalData: ParsedSunoOutput = {
+        style: tags,
+        title: title,
+        excludeStyles: metadata.negative_tags || '',
+        advancedParams: '',
+        vocalGender: '',
+        weirdness: metadata.control_sliders?.weirdness_constraint ? Math.round(metadata.control_sliders.weirdness_constraint * 100) : 50,
+        styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
+        lyricsWithTags: prompt,
+        lyricsAlone: stripMetaTags(prompt),
+        fullResponse: ''
+    };
+
+    return {
+        id: clip.id,
+        title: title,
+        created_at: clip.created_at,
+        model_name: clip.model_name || 'unknown',
+        imageUrl: clip.image_url,
+        imageLargeUrl: clip.image_large_url,
+        explicit: clip.explicit,
+        metadata: {
+            tags: tags,
+            prompt: prompt,
+            negative_tags: metadata.negative_tags,
+            duration: metadata.duration,
+            max_bpm: metadata.max_bpm,
+            min_bpm: metadata.min_bpm,
+            avg_bpm: metadata.avg_bpm,
+            key: metadata.key,
+        },
+        originalData: originalData
+    };
+};
 
 const App: React.FC = () => {
   const [state, setState] = useState<GenerationState>({
@@ -49,6 +91,7 @@ const App: React.FC = () => {
   const [sunoModel, setSunoModel] = useState('chirp-bluejay');
   const [sunoCredits, setSunoCredits] = useState<number | null>(null);
   const [isSyncingHistory, setIsSyncingHistory] = useState(false);
+  const [syncProgress, setSyncProgress] = useState('');
 
   const [promptSettings, setPromptSettings] = useState<PromptSettings>(() => {
       try {
@@ -77,6 +120,7 @@ const App: React.FC = () => {
       
       if (!historyFetchedRef.current) {
           historyFetchedRef.current = true;
+          // Initial fetch with default limit
           fetchAndMergeSunoHistory(savedCookie);
       }
     }
@@ -93,152 +137,90 @@ const App: React.FC = () => {
       localStorage.setItem('suno_prompt_settings', JSON.stringify(promptSettings));
   }, [promptSettings]);
 
+  const mergeClips = (newClips: SunoClip[]) => {
+      setHistory(prev => {
+        const nonDrafts = prev.filter(p => !p.id.startsWith('draft_'));
+        const map = new Map<string, SunoClip>(nonDrafts.map(c => [c.id, c]));
+
+        newClips.forEach(newClip => {
+            if (map.has(newClip.id)) {
+                    const existing = map.get(newClip.id)!;
+                    const isRich = !!existing.originalData?.fullResponse;
+                    
+                    map.set(newClip.id, {
+                        ...newClip,
+                        originalData: isRich ? existing.originalData : newClip.originalData,
+                        metadata: isRich ? existing.metadata : newClip.metadata,
+                        alignmentData: existing.alignmentData || newClip.alignmentData,
+                        lrcContent: existing.lrcContent || newClip.lrcContent,
+                        srtContent: existing.srtContent || newClip.srtContent,
+                    });
+            } else {
+                map.set(newClip.id, newClip);
+            }
+        });
+
+        const drafts = prev.filter(p => p.id.startsWith('draft_'));
+        const merged = Array.from(map.values());
+        return [...drafts, ...merged].sort((a, b) => 
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+    });
+  };
+
   const fetchAndMergeSunoHistory = async (cookie: string) => {
     try {
-        const feedData = await getSunoFeed(cookie);
+        const feedData = await getSunoFeed(cookie, 50);
         if (feedData && Array.isArray(feedData.clips)) {
-            const newClips: SunoClip[] = feedData.clips.map((clip: any) => {
-                const metadata = clip.metadata || {};
-                const tags = metadata.tags || '';
-                const prompt = metadata.prompt || '';
-                const title = clip.title || 'Untitled';
-
-                const originalData: ParsedSunoOutput = {
-                    style: tags,
-                    title: title,
-                    excludeStyles: metadata.negative_tags || '',
-                    advancedParams: '',
-                    vocalGender: '',
-                    weirdness: metadata.control_sliders?.weirdness_constraint ? Math.round(metadata.control_sliders.weirdness_constraint * 100) : 50,
-                    styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
-                    lyricsWithTags: prompt,
-                    lyricsAlone: stripMetaTags(prompt),
-                    fullResponse: ''
-                };
-
-                return {
-                    id: clip.id,
-                    title: title,
-                    created_at: clip.created_at,
-                    model_name: clip.model_name || 'unknown',
-                    imageUrl: clip.image_url,
-                    imageLargeUrl: clip.image_large_url,
-                    metadata: {
-                        tags: tags,
-                        prompt: prompt
-                    },
-                    originalData: originalData
-                };
-            });
-
-            setHistory(prevHistory => {
-                const existingMap = new Map<string, SunoClip>(prevHistory.map(item => [item.id, item]));
-                
-                newClips.forEach(newClip => {
-                    if (existingMap.has(newClip.id)) {
-                        const existing = existingMap.get(newClip.id)!;
-                        const isExistingRich = !!existing.originalData?.fullResponse;
-                        
-                        const mergedClip: SunoClip = {
-                            ...newClip,
-                            originalData: isExistingRich ? existing.originalData : newClip.originalData,
-                            metadata: isExistingRich ? existing.metadata : newClip.metadata,
-                            alignmentData: existing.alignmentData || newClip.alignmentData,
-                            lrcContent: existing.lrcContent || newClip.lrcContent,
-                            srtContent: existing.srtContent || newClip.srtContent,
-                        };
-                        existingMap.set(newClip.id, mergedClip);
-                    } else {
-                        existingMap.set(newClip.id, newClip);
-                    }
-                });
-
-                const merged = Array.from(existingMap.values()).sort((a: SunoClip, b: SunoClip) => 
-                    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-                );
-                
-                return merged;
-            });
+            const newClips = feedData.clips.map(mapSunoClip);
+            mergeClips(newClips);
         }
     } catch (e) {
         console.error("Failed to fetch history feed", e);
     }
   };
 
-  const handleRefreshHistory = async () => {
+  const handleFetchHistory = async (limit: number | 'all') => {
     if (!sunoCookie) {
          alert("Please connect your Suno account in Settings first.");
          return;
     }
+    
+    const fetchLimit = typeof limit === 'number' ? limit : 50;
+
     setIsSyncingHistory(true);
+    setSyncProgress('Fetching...');
+    
     try {
-        const feedData = await getSunoFeed(sunoCookie);
+        const feedData = await getSunoFeed(sunoCookie, fetchLimit);
+        
         if (feedData && Array.isArray(feedData.clips)) {
-            const newClips: SunoClip[] = feedData.clips.map((clip: any) => {
-                const metadata = clip.metadata || {};
-                const tags = metadata.tags || '';
-                const prompt = metadata.prompt || '';
-                const title = clip.title || 'Untitled';
-                
-                const originalData: ParsedSunoOutput = {
-                    style: tags,
-                    title: title,
-                    excludeStyles: metadata.negative_tags || '',
-                    advancedParams: '', 
-                    vocalGender: '', 
-                    weirdness: metadata.control_sliders?.weirdness_constraint ? Math.round(metadata.control_sliders.weirdness_constraint * 100) : 50,
-                    styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
-                    lyricsWithTags: prompt,
-                    lyricsAlone: stripMetaTags(prompt),
-                    fullResponse: ''
-                };
-
-                return {
-                    id: clip.id,
-                    title: title,
-                    created_at: clip.created_at,
-                    model_name: clip.model_name || 'unknown',
-                    imageUrl: clip.image_url,
-                    imageLargeUrl: clip.image_large_url,
-                    metadata: {
-                        tags: tags,
-                        prompt: prompt
-                    },
-                    originalData: originalData
-                };
-            });
-
-            setHistory(prev => {
-                const nonDrafts = prev.filter(p => !p.id.startsWith('draft_'));
-                const map = new Map<string, SunoClip>(nonDrafts.map(c => [c.id, c]));
-
-                newClips.forEach(newClip => {
-                    if (map.has(newClip.id)) {
-                         const existing = map.get(newClip.id)!;
-                         const isRich = !!existing.originalData?.fullResponse;
-                         
-                         map.set(newClip.id, {
-                             ...newClip,
-                             originalData: isRich ? existing.originalData : newClip.originalData,
-                             metadata: isRich ? existing.metadata : newClip.metadata,
-                             alignmentData: existing.alignmentData || newClip.alignmentData,
-                             lrcContent: existing.lrcContent || newClip.lrcContent,
-                             srtContent: existing.srtContent || newClip.srtContent,
-                         });
-                    } else {
-                        map.set(newClip.id, newClip);
-                    }
-                });
-
-                return Array.from(map.values()).sort((a: SunoClip, b: SunoClip) => 
-                    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-                );
-            });
+             const newClips = feedData.clips.map(mapSunoClip);
+             mergeClips(newClips);
+             setSyncProgress(`Updated ${newClips.length} items`);
         }
-    } catch(e) {
-        console.error("Sync failed", e);
+    } catch(e: any) {
+         if (e.message === "429") {
+             setSyncProgress(`Rate limited. Retrying...`);
+             await new Promise(r => setTimeout(r, 5000));
+             try {
+                const feedData = await getSunoFeed(sunoCookie, fetchLimit);
+                if (feedData && Array.isArray(feedData.clips)) {
+                    const newClips = feedData.clips.map(mapSunoClip);
+                    mergeClips(newClips);
+                    setSyncProgress(`Updated ${newClips.length} items`);
+                }
+             } catch (retryErr) {
+                 console.error("Retry failed", retryErr);
+                 alert("Failed to sync history due to rate limits.");
+             }
+         } else {
+            console.error("Sync flow failed", e);
+            alert("Failed to sync history.");
+         }
     } finally {
         setIsSyncingHistory(false);
+        setTimeout(() => { if (!isSyncingHistory) setSyncProgress(''); }, 2000);
     }
   };
 
@@ -286,9 +268,16 @@ const App: React.FC = () => {
             model_name: clip.model_name,
             imageUrl: clip.image_url,
             imageLargeUrl: clip.image_large_url,
+            explicit: clip.explicit,
             metadata: {
                 tags: clip.metadata?.tags || '',
-                prompt: clip.metadata?.prompt || ''
+                prompt: clip.metadata?.prompt || '',
+                negative_tags: clip.metadata?.negative_tags,
+                duration: clip.metadata?.duration,
+                max_bpm: clip.metadata?.max_bpm,
+                min_bpm: clip.metadata?.min_bpm,
+                avg_bpm: clip.metadata?.avg_bpm,
+                key: clip.metadata?.key
             },
             originalData: originalData
         }));
@@ -351,11 +340,9 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const handleAddClip = useCallback((newClip: SunoClip) => {
-    setHistory(prev => {
-        if (prev.some(c => c.id === newClip.id)) return prev;
-        return [newClip, ...prev];
-    });
+  const handleAddClip = useCallback((clips: SunoClip | SunoClip[]) => {
+      const clipsArray = Array.isArray(clips) ? clips : [clips];
+      mergeClips(clipsArray);
   }, []);
 
   const renderContent = () => {
@@ -367,8 +354,9 @@ const App: React.FC = () => {
                     onUpdateClip={handleUpdateClip} 
                     onAddClip={handleAddClip}
                     sunoCookie={sunoCookie}
-                    onResync={handleRefreshHistory}
+                    onFetchHistory={handleFetchHistory}
                     isSyncing={isSyncingHistory}
+                    syncProgress={syncProgress}
                 />
               );
           case 'visualizer':

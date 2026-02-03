@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
-import { SunoClip, AlignedWord } from '../../types';
+import { SunoClip } from '../../types';
 import CopyButton from '../CopyButton';
 import { getLyricAlignment } from '../../services/sunoApi';
-import { matchWordsToPrompt, stripMetaTags } from '../../utils/visualizer';
+import { matchWordsToPrompt, stripMetaTags, generateLrc, generateSrt } from '../../utils/lyrics';
 
 interface DetailsModalProps {
   clip: SunoClip;
@@ -36,7 +35,7 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
         model_name: clip.model_name.includes('Draft') ? 'Linked via ID' : clip.model_name
     });
     setManualIdInput('');
-    onClose(); // Close to refresh data cleanly in parent or handle better in real implementation
+    onClose(); 
   };
 
   const handleSaveLyrics = () => {
@@ -58,7 +57,24 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
           const result = await getLyricAlignment(clip.id, sunoCookie);
           if (result && result.aligned_words) {
               const newData = result.aligned_words;
-              onUpdateClip(clip.id, { alignmentData: newData });
+              
+              // Automatically generate LRC and SRT if we have lyrics available
+              let lrc = undefined;
+              let srt = undefined;
+              
+              if (editedLyrics) {
+                  const lines = matchWordsToPrompt(newData, editedLyrics);
+                  if (lines && lines.length > 0) {
+                      lrc = generateLrc(lines);
+                      srt = generateSrt(lines);
+                  }
+              }
+
+              onUpdateClip(clip.id, { 
+                  alignmentData: newData,
+                  lrcContent: lrc,
+                  srtContent: srt
+              });
           } else {
               setAlignmentError("No alignment data found.");
           }
@@ -81,38 +97,12 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
     window.URL.revokeObjectURL(blobUrl);
   };
 
-  // Helper functions for LRC/SRT
-  const formatLrcTime = (seconds: number) => {
-      const date = new Date(0);
-      date.setMilliseconds(seconds * 1000);
-      const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-      const secs = String(date.getUTCSeconds()).padStart(2, '0');
-      const hundredths = String(Math.floor(date.getUTCMilliseconds() / 10)).padStart(2, '0');
-      return `[${minutes}:${secs}.${hundredths}]`;
-  };
-
-  const formatSrtTime = (seconds: number) => {
-      const date = new Date(0);
-      date.setMilliseconds(seconds * 1000);
-      const hours = String(date.getUTCHours()).padStart(2, '0');
-      const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-      const secs = String(date.getUTCSeconds()).padStart(2, '0');
-      const milliseconds = String(date.getUTCMilliseconds()).padStart(3, '0');
-      return `${hours}:${minutes}:${secs},${milliseconds}`;
-  };
-
   const handleGenerateLRC = () => {
       if (!clip.alignmentData) return;
       const lines = matchWordsToPrompt(clip.alignmentData, editedLyrics);
       if (!lines || lines.length === 0) return;
 
-      let lrcContent = '';
-      lines.forEach(line => {
-          if (line.length === 0) return;
-          const time = formatLrcTime(line[0].start_s);
-          const lineText = line.map(w => w.word).join(' ');
-          lrcContent += `${time}${lineText}\n`;
-      });
+      const lrcContent = generateLrc(lines);
 
       const clean = stripMetaTags(editedLyrics);
       const baseOriginal = clip.originalData || {
@@ -130,14 +120,7 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
       const lines = matchWordsToPrompt(clip.alignmentData, editedLyrics);
       if (!lines || lines.length === 0) return;
 
-      let srtContent = '';
-      lines.forEach((line, index) => {
-          if (line.length === 0) return;
-          const startTime = formatSrtTime(line[0].start_s);
-          const endTime = formatSrtTime(line[line.length - 1].end_s);
-          const lineText = line.map(w => w.word).join(' ');
-          srtContent += `${index + 1}\n${startTime} --> ${endTime}\n${lineText}\n\n`;
-      });
+      const srtContent = generateSrt(lines);
       
       const clean = stripMetaTags(editedLyrics);
       const baseOriginal = clip.originalData || {
@@ -157,13 +140,29 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
       return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
   };
 
+  const formatDuration = (seconds?: number) => {
+      if (typeof seconds !== 'number') return 'N/A';
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const clipData = {
       title: clip.title || clip.originalData?.title || 'Untitled',
-      style: clip.originalData?.style || clip.metadata.tags || '',
-      excludeStyles: clip.originalData?.excludeStyles || '',
+      style: clip.metadata?.tags || clip.originalData?.style || '',
+      excludeStyles: clip.metadata?.negative_tags || clip.originalData?.excludeStyles || '',
       advancedParams: clip.originalData?.advancedParams || '',
-      lyrics: clip.originalData?.lyricsWithTags || clip.metadata.prompt || '',
-      isRich: !!clip.originalData?.fullResponse
+      prompt: clip.metadata?.prompt || clip.originalData?.lyricsWithTags || '',
+      weirdness: clip.originalData?.weirdness ?? 50,
+      styleInfluence: clip.originalData?.styleInfluence ?? 50,
+      
+      // New fields
+      maxBpm: clip.metadata?.max_bpm,
+      minBpm: clip.metadata?.min_bpm,
+      avgBpm: clip.metadata?.avg_bpm,
+      key: clip.metadata?.key,
+      explicit: clip.explicit,
+      duration: clip.metadata?.duration
   };
 
   return (
@@ -175,8 +174,19 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
             {/* Modal Header */}
             <div className="p-4 border-b border-slate-800 flex justify-between items-start bg-slate-900/50">
                 <div>
-                    <h2 className="text-xl font-bold text-white leading-tight pr-4">
+                    <h2 className="text-xl font-bold text-white leading-tight pr-4 flex items-center gap-2">
                         {clipData.title}
+                        {clipData.explicit && (
+                            <div className="group relative">
+                                <svg className="w-5 h-5 text-red-500 fill-current" viewBox="0 0 24 24">
+                                    <title>Explicit Content</title>
+                                    <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-4 6h-4v2h4v2h-4v2h4v2H9V7h6v2z" />
+                                </svg>
+                                <span className="absolute left-full ml-2 top-0 px-2 py-1 bg-slate-800 text-xs text-red-400 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap border border-slate-700 pointer-events-none">
+                                    Explicit
+                                </span>
+                            </div>
+                        )}
                     </h2>
                     <div className="flex items-center gap-2 mt-1 text-xs text-slate-400">
                             <span className="font-mono bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">{clip.model_name}</span>
@@ -197,44 +207,81 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
             {/* Modal Content */}
             <div className="p-6 overflow-y-auto custom-scrollbar space-y-6 bg-slate-950/30">
                 
-                {/* Style Tags */}
-                {clipData.style && (
-                    <div className="space-y-2">
-                            <div className="flex justify-between items-center">
-                            <h3 className="text-xs font-bold text-purple-400 uppercase tracking-wider">Style Tags</h3>
-                            <CopyButton text={clipData.style} label="Copy" />
-                            </div>
-                            <div className="p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg">
-                            <p className="text-sm text-slate-200 font-mono break-words">{clipData.style}</p>
-                            </div>
-                    </div>
-                )}
+                {/* Top Grid: Style & Details */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Style Tags */}
+                    {clipData.style && (
+                        <div className="space-y-2">
+                                <div className="flex justify-between items-center">
+                                <h3 className="text-xs font-bold text-purple-400 uppercase tracking-wider">Style Tags</h3>
+                                <CopyButton text={clipData.style} label="Copy" />
+                                </div>
+                                <div className="p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg">
+                                <p className="text-sm text-slate-200 font-mono break-words">{clipData.style}</p>
+                                </div>
+                        </div>
+                    )}
 
-                {/* Exclude & Params */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Negative Tags */}
                     {clipData.excludeStyles && (
-                            <div className="space-y-2">
-                            <h3 className="text-xs font-bold text-red-400 uppercase tracking-wider">Excluded Styles</h3>
+                        <div className="space-y-2">
+                            <h3 className="text-xs font-bold text-red-400 uppercase tracking-wider">Negative Tags</h3>
                             <div className="p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg h-full">
                                 <p className="text-sm text-red-200 font-mono break-words">{clipData.excludeStyles}</p>
                             </div>
                         </div>
                     )}
-                    
-                    {clipData.advancedParams && (
-                            <div className="space-y-2">
-                            <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider">Parameters</h3>
-                            <div className="p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg h-full text-sm text-slate-300 font-mono space-y-1">
-                                {clipData.advancedParams.split('\n').map((line, i) => (
-                                    <div key={i} className="flex items-start gap-2">
-                                        <span className="text-blue-500">•</span>
-                                        <span>{line.replace(/^\W+/, '')}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
                 </div>
+
+                {/* Song Stats & Parameters */}
+                <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div>
+                        <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Key</span>
+                        <span className="text-sm font-mono text-white">{clipData.key ? clipData.key.replace('_', ' ') : 'N/A'}</span>
+                    </div>
+                    <div>
+                        <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">BPM (Avg)</span>
+                        <span className="text-sm font-mono text-white">{clipData.avgBpm ? clipData.avgBpm.toFixed(1) : 'N/A'}</span>
+                    </div>
+                    <div>
+                        <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Duration</span>
+                        <span className="text-sm font-mono text-white">{formatDuration(clipData.duration)}</span>
+                    </div>
+                    <div>
+                        <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Explicit</span>
+                        <span className={`text-sm font-mono ${clipData.explicit ? 'text-red-400' : 'text-slate-400'}`}>
+                            {clipData.explicit ? 'Yes' : 'No'}
+                        </span>
+                    </div>
+                    
+                    {/* Control Sliders */}
+                    <div className="col-span-2 sm:col-span-2 pt-2 border-t border-slate-800 mt-2">
+                        <div className="flex justify-between items-center mb-1">
+                            <span className="text-[10px] text-purple-400 font-bold uppercase">Weirdness</span>
+                            <span className="text-[10px] text-purple-400 font-mono">{clipData.weirdness}%</span>
+                        </div>
+                        <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                            <div className="bg-gradient-to-r from-purple-900 to-purple-500 h-1.5 rounded-full" style={{ width: `${clipData.weirdness}%` }}></div>
+                        </div>
+                    </div>
+                    <div className="col-span-2 sm:col-span-2 pt-2 border-t border-slate-800 mt-2">
+                        <div className="flex justify-between items-center mb-1">
+                            <span className="text-[10px] text-blue-400 font-bold uppercase">Style Influence</span>
+                            <span className="text-[10px] text-blue-400 font-mono">{clipData.styleInfluence}%</span>
+                        </div>
+                        <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                            <div className="bg-gradient-to-r from-blue-900 to-blue-500 h-1.5 rounded-full" style={{ width: `${clipData.styleInfluence}%` }}></div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Additional BPM Stats if available */}
+                {(clipData.maxBpm || clipData.minBpm) && (
+                    <div className="flex gap-4 text-xs text-slate-500 font-mono bg-slate-900/30 p-2 rounded border border-slate-800/50">
+                        {clipData.maxBpm && <span>Max BPM: <span className="text-slate-300">{clipData.maxBpm.toFixed(1)}</span></span>}
+                        {clipData.minBpm && <span>Min BPM: <span className="text-slate-300">{clipData.minBpm.toFixed(1)}</span></span>}
+                    </div>
+                )}
 
                 {/* Lyrics Alignment Section */}
                 {!isDraft && (
@@ -373,24 +420,24 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
                     </div>
                 )}
 
-                {/* Lyrics - Rich */}
-                {clipData.isRich && clipData.lyrics && (
+                {/* Key Prompt (Lyrics with Tags) */}
+                {clipData.prompt && (
                         <div className="space-y-2 pt-2 border-t border-slate-800">
                             <div className="flex justify-between items-center">
-                            <h3 className="text-xs font-bold text-pink-400 uppercase tracking-wider">Lyrics with Meta Tags</h3>
-                            <CopyButton text={clipData.lyrics} label="Copy Lyrics" />
+                            <h3 className="text-xs font-bold text-pink-400 uppercase tracking-wider">Key Prompt (Lyrics with Tags)</h3>
+                            <CopyButton text={clipData.prompt} label="Copy" />
                             </div>
                             <div className="p-4 bg-slate-900 border border-slate-800 rounded-lg max-h-[300px] overflow-y-auto custom-scrollbar">
-                            <pre className="text-sm text-slate-300 font-mono whitespace-pre-wrap leading-relaxed">{clipData.lyrics}</pre>
+                            <pre className="text-sm text-slate-300 font-mono whitespace-pre-wrap leading-relaxed">{clipData.prompt}</pre>
                             </div>
                     </div>
                 )}
 
-                    {/* Clean Lyrics / Raw Prompt - Always show */}
+                    {/* Clean Lyrics (Editable) */}
                     <div className="space-y-2">
                         <div className="flex justify-between items-center">
                         <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                            {clipData.isRich ? "Clean Lyrics (Editable)" : "Lyrics / Prompt (Editable)"}
+                            Clean Lyrics (Editable)
                         </h3>
                         <div className="flex gap-2">
                             <button 

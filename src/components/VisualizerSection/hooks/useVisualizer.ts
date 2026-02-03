@@ -1,8 +1,10 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { SunoClip, AlignedWord, Qt6Style } from '../../../types';
 import { getLyricAlignment, getSunoClip } from '../../../services/sunoApi';
 import { ASPECT_RATIOS } from '../../../constants';
-import { drawCover, drawQt6Visualizer, drawScrollingLyrics, groupLyricsByLines, matchWordsToPrompt, groupWordsByTiming, stripMetaTags, getCleanAlignedWords } from '../../../utils/visualizer';
+import { drawCover, drawQt6Visualizer, drawScrollingLyrics, formatTime } from '../../../utils/visualizer';
+import { groupLyricsByLines, matchWordsToPrompt, groupWordsByTiming, stripMetaTags, getCleanAlignedWords } from '../../../utils/lyrics';
 import { performOfflineRender } from '../../../utils/offlineRender';
 
 export const useVisualizer = (
@@ -108,9 +110,9 @@ export const useVisualizer = (
         }
     }, [clipData]);
 
-    const handleImageError = () => {
+    const handleImageError = useCallback(() => {
         setImgSrc('https://placehold.co/1080x1080/1e293b/475569?text=No+Cover');
-    };
+    }, []);
 
     // Load Clip Data
     useEffect(() => {
@@ -202,11 +204,11 @@ export const useVisualizer = (
         loadData();
     }, [selectedClipId, history, sunoCookie, onUpdateClip]);
 
-    const handleManualLoad = () => {
+    const handleManualLoad = useCallback(() => {
         if (manualId.trim()) setSelectedClipId(manualId.trim());
-    };
+    }, [manualId]);
 
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
             const url = URL.createObjectURL(file);
@@ -217,9 +219,9 @@ export const useVisualizer = (
             setCustomBg({ url, type, name: file.name });
             setVisualMode('cover'); 
         }
-    };
+    }, []);
 
-    const handleAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleAudioUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
             const url = URL.createObjectURL(file);
@@ -229,15 +231,15 @@ export const useVisualizer = (
                 setIsPlaying(false);
             }
         }
-    };
+    }, []);
 
-    const handleApplyLyrics = () => {
+    const handleApplyLyrics = useCallback(() => {
         if(!alignment) return;
         const newLines = matchWordsToPrompt(alignment, lyricSource);
         setLines(newLines);
         setApplyStatus('applied');
         setTimeout(() => setApplyStatus('idle'), 2000);
-    };
+    }, [alignment, lyricSource]);
 
     const handleSmartGroup = async () => {
         if (!clipData || !alignment) return;
@@ -263,28 +265,34 @@ export const useVisualizer = (
         }
     };
 
-    const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const time = parseFloat(e.target.value);
         if (audioRef.current) {
             audioRef.current.currentTime = time;
             setProgress(time);
         }
-    };
+    }, []);
 
-    const togglePlay = () => {
+    const togglePlay = useCallback(() => {
         if (audioRef.current) {
             if (audioRef.current.paused) {
                 if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-                    audioContextRef.current.resume();
+                    audioContextRef.current.resume().catch(console.error);
                 }
-                audioRef.current.play();
+                const p = audioRef.current.play();
+                if (p !== undefined) {
+                    p.catch(e => {
+                        console.error("Playback error:", e);
+                        setIsPlaying(false);
+                    });
+                }
                 // State update handled by event listeners in component
             } else {
                 audioRef.current.pause();
                 // State update handled by event listeners in component
             }
         }
-    };
+    }, []);
 
     // --- DRAWING LOGIC ---
     const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number, data?: Uint8Array | Float32Array) => {

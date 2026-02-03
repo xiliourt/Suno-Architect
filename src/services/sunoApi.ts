@@ -1,3 +1,4 @@
+
 import { ParsedSunoOutput, LyricAlignmentResponse } from "../types";
 
 export const getSunoCredits = async (cookie: string): Promise<number> => {
@@ -32,11 +33,15 @@ export const getSunoCredits = async (cookie: string): Promise<number> => {
     }
 };
 
-export const getSunoFeed = async (cookie: string): Promise<any> => {
+export const getSunoFeed = async (
+    cookie: string, 
+    limit: number = 20, 
+    cursor: string | null = null, 
+    searchText?: string
+): Promise<any> => {
     if (!cookie) throw new Error("No cookie provided");
 
-    // Direct Feed Endpoint
-    const FEED_ENDPOINT = "https://studio-api.prod.suno.com/api/feed/v2?page=0";
+    const FEED_ENDPOINT = `https://studio-api.prod.suno.com/api/feed/v3`;
 
     try {
         const headers: Record<string, string> = {
@@ -46,10 +51,31 @@ export const getSunoFeed = async (cookie: string): Promise<any> => {
         const trimmedCookie = cookie.trim();
         headers["Authorization"] = `Bearer ${trimmedCookie}`;
 
+        const body: any = {
+            "cursor": cursor,
+            "limit": limit,
+            "filters": {
+                "disliked": "False",
+                "fullSong": "True",
+                "trashed": "False",
+                "fromStudioProject": { "presence": "False" },
+                "stem": { "presence": "False" }
+            }
+        };
+
+        if (searchText && searchText.trim()) {
+            body.filters.searchText = searchText.trim();
+        }
+
         const response = await fetch(FEED_ENDPOINT, {
-            method: "GET",
-            headers: headers
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify(body),
         });
+
+        if (response.status === 429) {
+            throw new Error("429");
+        }
 
         if (!response.ok) {
             throw new Error(`Failed to fetch feed. Status: ${response.status}`);
@@ -57,7 +83,7 @@ export const getSunoFeed = async (cookie: string): Promise<any> => {
 
         return await response.json();
     } catch (error) {
-        console.error("Failed to get suno feed:", error);
+        // console.error("Failed to get suno feed:", error);
         throw error;
     }
 };
@@ -131,7 +157,7 @@ export const triggerSunoGeneration = async (
   }
 
   // Use the proxy endpoint to avoid CORS issues and manage headers
-  const API_ENDPOINT = "/api/suno-proxy";
+  const API_ENDPOINT = "https://sunoarchitect.xiliourt.ovh/api/suno-proxy";
   
   // Normalize 0-100 to 0.0-1.0
   const weirdness = typeof data.weirdness === 'number' ? data.weirdness / 100 : 0.5;

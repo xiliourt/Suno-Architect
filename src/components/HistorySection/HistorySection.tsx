@@ -1,131 +1,182 @@
-
-import React, { useState } from 'react';
-import { SunoClip } from '../../types';
-import { getSunoClip } from '../../services/sunoApi';
-import { ParsedSunoOutput } from '../../types';
+import React, { useState, useMemo } from 'react';
+import { SunoClip, ParsedSunoOutput } from '../../types';
+import { getSunoClip, getSunoFeed } from '../../services/sunoApi';
 import HistoryToolbar from './HistoryToolbar';
 import HistoryCard from './HistoryCard';
 import DetailsModal from './DetailsModal';
-import { stripMetaTags } from '../../utils/visualizer';
+import { stripMetaTags } from '../../utils/lyrics';
 
 interface HistorySectionProps {
   history: SunoClip[];
   onUpdateClip: (id: string, updates: Partial<SunoClip>) => void;
-  onAddClip: (clip: SunoClip) => void;
+  onAddClip: (clip: SunoClip | SunoClip[]) => void;
   sunoCookie?: string;
-  onResync: () => void;
+  onFetchHistory: (limit: number | 'all') => void;
   isSyncing: boolean;
+  syncProgress?: string;
 }
 
-const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, onAddClip, sunoCookie, onResync, isSyncing }) => {
-  const [selectedClip, setSelectedClip] = useState<SunoClip | null>(null);
-  const [importId, setImportId] = useState('');
-  const [isImporting, setIsImporting] = useState(false);
+// Helper to map API response to SunoClip (reused logic)
+const mapSunoClip = (clip: any): SunoClip => {
+    const metadata = clip.metadata || {};
+    const tags = metadata.tags || '';
+    const prompt = metadata.prompt || '';
+    const title = clip.title || 'Untitled';
+
+    const originalData: ParsedSunoOutput = {
+        style: tags,
+        title: title,
+        excludeStyles: metadata.negative_tags || '',
+        advancedParams: '',
+        vocalGender: '',
+        weirdness: metadata.control_sliders?.weirdness_constraint ? Math.round(metadata.control_sliders.weirdness_constraint * 100) : 50,
+        styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
+        lyricsWithTags: prompt,
+        lyricsAlone: stripMetaTags(prompt),
+        fullResponse: ''
+    };
+
+    return {
+        id: clip.id,
+        title: title,
+        created_at: clip.created_at,
+        model_name: clip.model_name || 'unknown',
+        imageUrl: clip.image_url,
+        imageLargeUrl: clip.image_large_url,
+        explicit: clip.explicit,
+        metadata: {
+            tags: tags,
+            prompt: prompt,
+            negative_tags: metadata.negative_tags,
+            duration: metadata.duration,
+            max_bpm: metadata.max_bpm,
+            min_bpm: metadata.min_bpm,
+            avg_bpm: metadata.avg_bpm,
+            key: metadata.key,
+        },
+        originalData: originalData
+    };
+};
+
+const HistorySection: React.FC<HistorySectionProps> = ({ history, onUpdateClip, onAddClip, sunoCookie, onFetchHistory, isSyncing, syncProgress }) => {
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  
+  // Search & Filter State
+  const [searchText, setSearchText] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<SunoClip[] | null>(null);
+  const [limit, setLimit] = useState<number>(50);
+
+  // Derive the active clip from history to ensure we always have the latest data
+  const selectedClip = useMemo(() => {
+    // Check history first, then search results
+    let clip = history.find(c => c.id === selectedClipId);
+    if (!clip && searchResults) {
+        clip = searchResults.find(c => c.id === selectedClipId);
+    }
+    return clip || null;
+  }, [history, searchResults, selectedClipId]);
 
   const isDraft = (clip: SunoClip) => clip.id.startsWith('draft_');
 
-  const handleImport = async () => {
-      if (!importId.trim()) return;
+  const handleSearchOrImport = async () => {
+      if (!searchText.trim()) return;
       if (!sunoCookie) {
-          alert("Please connect Suno API in settings to import songs by ID.");
+          alert("Please connect Suno API in settings to search or import.");
           return;
       }
       
-      setIsImporting(true);
+      setIsSearching(true);
+      const input = searchText.trim();
+      
+      // UUID Check for Direct Import
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input);
+
       try {
-          const data = await getSunoClip(importId.trim(), sunoCookie);
-          if (data) {
-              const metadata = data.metadata || {};
-              const clip: SunoClip = {
-                  id: data.id,
-                  title: data.title || 'Imported Song',
-                  created_at: data.created_at || new Date().toISOString(),
-                  model_name: data.model_name || 'unknown',
-                  imageUrl: data.image_url,
-                  imageLargeUrl: data.image_large_url,
-                  metadata: {
-                      tags: metadata.tags || '',
-                      prompt: metadata.prompt || ''
-                  },
-                  originalData: {
-                        style: metadata.tags || '',
-                        title: data.title || '',
-                        excludeStyles: metadata.negative_tags || '',
-                        advancedParams: '',
-                        vocalGender: '',
-                        weirdness: 0,
-                        styleInfluence: 0,
-                        lyricsWithTags: metadata.prompt || '',
-                        lyricsAlone: stripMetaTags(metadata.prompt || ''),
-                        fullResponse: ''
-                  }
-              };
-              onAddClip(clip);
-              setImportId('');
+          if (isUUID) {
+              // Direct Import
+              const data = await getSunoClip(input, sunoCookie);
+              if (data) {
+                  const clip = mapSunoClip(data);
+                  onAddClip(clip);
+                  // Display the imported clip as a search result
+                  setSearchResults([clip]);
+              }
+          } else {
+              // Feed Search
+              const data = await getSunoFeed(sunoCookie, limit, null, input);
+              if (data && Array.isArray(data.clips)) {
+                  const results = data.clips.map(mapSunoClip);
+                  setSearchResults(results);
+                  // Automatically merge search results into history persistence
+                  onAddClip(results); 
+              } else {
+                  setSearchResults([]);
+              }
           }
-      } catch (e) {
-          console.error(e);
-          alert("Failed to import song. Check ID and Cookie.");
+      } catch (e: any) {
+          console.error("Search/Import failed", e);
+          alert("Failed to process request. Check ID/Connection.");
       } finally {
-          setIsImporting(false);
+          setIsSearching(false);
       }
   };
 
-  const closeModal = () => {
-    setSelectedClip(null);
+  const handleClearSearch = () => {
+      setSearchText('');
+      setSearchResults(null);
   };
 
-  const handleUpdateCurrentClip = (id: string, updates: Partial<SunoClip>) => {
-      onUpdateClip(id, updates);
-      // Also update local state so modal reflects changes instantly
-      setSelectedClip(prev => prev ? ({ ...prev, ...updates }) : null);
-  };
+  const displayList = (searchText && searchResults) ? searchResults : history;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      
-      <HistoryToolbar 
-        count={history.length}
-        importId={importId}
-        setImportId={setImportId}
-        onImport={handleImport}
-        isImporting={isImporting}
-        onResync={onResync}
-        isSyncing={isSyncing}
-      />
-
-      {history.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-12 text-center border-2 border-dashed border-slate-800 rounded-2xl bg-slate-900/20 text-slate-600 min-h-[300px]">
-            <p className="text-lg font-medium">No History Yet</p>
-            <p className="text-sm mt-1 mb-4">Generated songs and prompts will appear here.</p>
-            {!sunoCookie && (
-                <p className="text-xs text-purple-400 bg-purple-900/10 px-3 py-1 rounded-full border border-purple-900/30">
-                    Connect Suno API in settings to sync your feed.
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <HistoryToolbar 
+            count={history.length}
+            searchText={searchText}
+            setSearchText={setSearchText}
+            onAction={handleSearchOrImport}
+            isActionLoading={isSearching}
+            onFetchHistory={onFetchHistory}
+            isSyncing={isSyncing}
+            syncProgress={syncProgress}
+            limit={limit}
+            setLimit={setLimit}
+            onClearSearch={handleClearSearch}
+            isShowingSearchResults={!!(searchText && searchResults)}
+        />
+        
+        {displayList.length === 0 ? (
+             <div className="text-center py-20 bg-slate-800/30 rounded-xl border-2 border-dashed border-slate-700">
+                <p className="text-slate-500 mb-2">
+                    {searchText && searchResults ? "No results found for search." : "Your history is empty."}
                 </p>
-            )}
-          </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {history.map((clip) => (
-                <HistoryCard 
-                    key={clip.id} 
-                    clip={clip} 
-                    onClick={() => setSelectedClip(clip)}
-                    isDraft={isDraft(clip)}
-                />
-            ))}
-        </div>
-      )}
+                <p className="text-xs text-slate-600">
+                    {searchText && searchResults ? "Try a different keyword." : "Generated songs and drafts will appear here."}
+                </p>
+             </div>
+        ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {displayList.map((clip) => (
+                    <HistoryCard 
+                        key={clip.id} 
+                        clip={clip} 
+                        onClick={() => setSelectedClipId(clip.id)}
+                        isDraft={isDraft(clip)}
+                    />
+                ))}
+            </div>
+        )}
 
-      {selectedClip && (
-          <DetailsModal 
-              clip={selectedClip} 
-              onClose={closeModal} 
-              onUpdateClip={handleUpdateCurrentClip}
-              sunoCookie={sunoCookie}
-              isDraft={isDraft(selectedClip)}
-          />
-      )}
+        {selectedClip && (
+            <DetailsModal 
+                clip={selectedClip} 
+                onClose={() => setSelectedClipId(null)} 
+                onUpdateClip={onUpdateClip}
+                sunoCookie={sunoCookie}
+                isDraft={isDraft(selectedClip)}
+            />
+        )}
     </div>
   );
 };
