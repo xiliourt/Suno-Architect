@@ -24,7 +24,19 @@ export const useVisualizer = (
     const [customBg, setCustomBg] = useState<{ url: string, type: 'image' | 'video', name: string } | null>(null);
     const [customAudio, setCustomAudio] = useState<{ url: string, name: string } | null>(null);
     const [audioBitrate, setAudioBitrate] = useState(192000);
+    const [videoBitrate, setVideoBitrate] = useState(5000000);
+    const [videoBitrateMode, setVideoBitrateMode] = useState<'constant' | 'variable'>('variable');
     const [imgSrc, setImgSrc] = useState<string>('');
+
+    // Update video bitrate based on resolution
+    useEffect(() => {
+        const dims = ASPECT_RATIOS[aspectRatio];
+        if (dims.width >= 1920 || dims.height >= 1920) {
+            setVideoBitrate(8000000);
+        } else {
+            setVideoBitrate(5000000);
+        }
+    }, [aspectRatio]);
 
     // Style Customization State
     const [activeColor, setActiveColor] = useState('#e879f9');
@@ -64,11 +76,15 @@ export const useVisualizer = (
     // Rendering State
     const [isRendering, setIsRendering] = useState(false);
     const [renderProgress, setRenderProgress] = useState(0);
+    const [renderSpeed, setRenderSpeed] = useState(0);
     const [isPreparing, setIsPreparing] = useState(false);
     const [isGrouping, setIsGrouping] = useState(false);
     const [progress, setProgress] = useState(0); 
     const [duration, setDuration] = useState(0);
     const [isPlaying, setIsPlaying] = useState(false);
+
+    const renderStartTimeRef = useRef(0);
+    const lastSpeedUpdateRef = useRef(0);
 
     // Setup Audio Analysis for Qt6 Visualizer
     useEffect(() => {
@@ -358,15 +374,6 @@ export const useVisualizer = (
         });
 
         // Title & Progress Bar
-        ctx.textAlign = 'center';
-        ctx.font = `bold 24px ${fontFamily}`;
-        ctx.fillStyle = '#ffffff';
-        
-        const titleY = aspectRatio === "9:16" ? 120 : 60;
-        if (clipData?.title) {
-            ctx.fillText(clipData.title, width / 2, titleY);
-        }
-
         if (clipData && duration) {
             const pct = time / duration;
             ctx.fillStyle = activeColor;
@@ -411,6 +418,9 @@ export const useVisualizer = (
 
         setIsRendering(true);
         setRenderProgress(0);
+        setRenderSpeed(0);
+        renderStartTimeRef.current = performance.now();
+        lastSpeedUpdateRef.current = 0;
 
         const originalSmoothRef = smoothLineIdxRef.current;
         smoothLineIdxRef.current = 0; 
@@ -423,6 +433,8 @@ export const useVisualizer = (
                     width: ASPECT_RATIOS[aspectRatio].width,
                     height: ASPECT_RATIOS[aspectRatio].height,
                     bitrate: audioBitrate,
+                    videoBitrate,
+                    videoBitrateMode,
                     title: clipData.title || "video",
                     visualMode,
                     qt6Style,
@@ -430,7 +442,19 @@ export const useVisualizer = (
                     customBgType: customBg?.type
                 },
                 setRenderProgress,
-                (ctx, time, data) => renderFrame(ctx, ASPECT_RATIOS[aspectRatio].width, ASPECT_RATIOS[aspectRatio].height, time, data)
+                (ctx, time, data) => {
+                    renderFrame(ctx, ASPECT_RATIOS[aspectRatio].width, ASPECT_RATIOS[aspectRatio].height, time, data);
+                    
+                    // Calculate Speed
+                    const now = performance.now();
+                    if (now - lastSpeedUpdateRef.current > 500) {
+                        const elapsed = (now - renderStartTimeRef.current) / 1000;
+                        if (elapsed > 0.1) {
+                            setRenderSpeed(time / elapsed);
+                            lastSpeedUpdateRef.current = now;
+                        }
+                    }
+                }
             );
         } catch (e: any) {
             if(e.message !== "Render Cancelled") {
@@ -448,14 +472,14 @@ export const useVisualizer = (
     return {
         state: {
             selectedClipId, manualId, aspectRatio, visualMode, customBg, customAudio,
-            audioBitrate, imgSrc, activeColor, inactiveColor, inactiveOpacity, fontFamily,
+            audioBitrate, videoBitrate, videoBitrateMode, imgSrc, activeColor, inactiveColor, inactiveOpacity, fontFamily,
             smoothingFactor, verticalOffset, qt6Style, qt6BarCount, qt6Sensitivity,
             clipData, alignment, lines, lyricSource, applyStatus,
-            isRendering, renderProgress, isPreparing, isGrouping, progress, duration, isPlaying
+            isRendering, renderProgress, renderSpeed, isPreparing, isGrouping, progress, duration, isPlaying
         },
         setters: {
             setSelectedClipId, setManualId, setAspectRatio, setVisualMode, setCustomBg, setCustomAudio,
-            setAudioBitrate, setImgSrc, setActiveColor, setInactiveColor, setInactiveOpacity, setFontFamily,
+            setAudioBitrate, setVideoBitrate, setVideoBitrateMode, setImgSrc, setActiveColor, setInactiveColor, setInactiveOpacity, setFontFamily,
             setSmoothingFactor, setVerticalOffset, setQt6Style, setQt6BarCount, setQt6Sensitivity,
             setLyricSource, setIsPlaying
         },

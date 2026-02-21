@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { VISUALIZER_FONTS } from '../../constants';
 import { Qt6Style } from '../../types';
@@ -23,18 +22,24 @@ interface VisualizerSettingsProps {
     setQt6BarCount: (val: number) => void;
     qt6Sensitivity: number;
     setQt6Sensitivity: (val: number) => void;
+    videoBitrate: number;
+    setVideoBitrate: (val: number) => void;
+    videoBitrateMode: 'constant' | 'variable';
+    setVideoBitrateMode: (val: 'constant' | 'variable') => void;
     onReset: () => void;
 }
 
 const VisualizerSettings: React.FC<VisualizerSettingsProps> = ({
     fontFamily, setFontFamily, activeColor, setActiveColor, inactiveColor, setInactiveColor,
     smoothingFactor, setSmoothingFactor, verticalOffset, setVerticalOffset, inactiveOpacity, setInactiveOpacity,
-    visualMode, qt6Style, setQt6Style, qt6BarCount, setQt6BarCount, qt6Sensitivity, setQt6Sensitivity, onReset
+    visualMode, qt6Style, setQt6Style, qt6BarCount, setQt6BarCount, qt6Sensitivity, setQt6Sensitivity, 
+    videoBitrate, setVideoBitrate, videoBitrateMode, setVideoBitrateMode,
+    onReset
 }) => {
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
         <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Visual Settings</h3>
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Visual & Export Settings</h3>
             <button onClick={onReset} className="text-xs text-purple-400 hover:text-purple-300">Reset to Default</button>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -105,6 +110,29 @@ const VisualizerSettings: React.FC<VisualizerSettingsProps> = ({
                     <span>Top</span>
                     <span>Bottom</span>
                 </div>
+            </div>
+            
+            {/* Export Settings */}
+            <div className="col-span-2 md:col-span-1">
+                <label className="text-[10px] text-slate-500 block mb-1">Video Bitrate (bps)</label>
+                <input 
+                    type="number" 
+                    value={videoBitrate}
+                    onChange={(e) => setVideoBitrate(Number(e.target.value))}
+                    className="w-full bg-slate-800 border border-slate-700 rounded p-1.5 text-xs text-slate-200"
+                    step={100000}
+                />
+            </div>
+            <div className="col-span-2 md:col-span-1">
+                <label className="text-[10px] text-slate-500 block mb-1">Bitrate Mode</label>
+                <select 
+                    value={videoBitrateMode}
+                    onChange={(e) => setVideoBitrateMode(e.target.value as 'constant' | 'variable')}
+                    className="w-full bg-slate-800 border border-slate-700 rounded p-1.5 text-xs text-slate-200"
+                >
+                    <option value="variable">Variable (VBR)</option>
+                    <option value="constant">Constant (CBR)</option>
+                </select>
             </div>
         </div>
 

@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@google/genai": "^1.33.0",
+    "@google/genai": "^1.42.0",
     "mediabunny": "^1.34.4",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
@@ -21,5 +21,8 @@
     "tailwindcss": "^4.1.8",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
+  },
+  "overrides": {
+    "minimatch": "^10.2.1"
   }
 }

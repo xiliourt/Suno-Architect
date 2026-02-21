@@ -47,13 +47,15 @@ let audioSource: AudioBufferSource;
 let offscreenCanvas: OffscreenCanvas;
 let offscreenCtx: OffscreenCanvasRenderingContext2D;
 let fallbackTarget: BufferTarget | undefined;
+let fps: number = 60;
 
 self.onmessage = async (e) => {
     try {
         const { type } = e.data;
 
         if (type === 'INIT') {
-            const { config, fps, fileHandle, audioData } = e.data;
+            const { config, fps: initFps, fileHandle, audioData } = e.data;
+            fps = initFps;
             
             let target;
             if (fileHandle) {
@@ -74,15 +76,17 @@ self.onmessage = async (e) => {
 
             videoSource = new CanvasSource(offscreenCanvas, {
                 codec: 'avc',
-                bitrate: 5_000_000,
-                bitrateMode: 'variable' 
+                bitrate: config.videoBitrate || 5_000_000,
+                bitrateMode: config.videoBitrateMode || 'variable' 
             });
             output.addVideoTrack(videoSource, { frameRate: fps });
 
+            const useFlac = (config.bitrate || 0) > 192000;
             audioSource = new AudioBufferSource({
-                codec: 'aac', // CHANGED: AAC audio codec
-                bitrate: config.bitrate || 128000
+                codec: useFlac ? 'pcm-s16' : 'aac',
+                ...(!useFlac && { bitrate: config.bitrate || 128000 })
             });
+
             output.addAudioTrack(audioSource);
 
             await output.start();
@@ -108,7 +112,7 @@ self.onmessage = async (e) => {
             offscreenCtx.drawImage(bitmap, 0, 0);
             bitmap.close(); 
 
-            await videoSource.add(time, 1 / 60, { keyFrame });
+            await videoSource.add(time, 1 / fps, { keyFrame });
 
             self.postMessage({ type: 'FRAME_ENCODED' });
         }

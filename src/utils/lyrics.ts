@@ -1,4 +1,3 @@
-
 import { AlignedWord } from '../types';
 import { Type, GoogleGenAI } from "@google/genai";
 
@@ -35,7 +34,29 @@ export const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
         
         const trimmed = cleanedWord.trim();
         if (trimmed.length > 0) {
-            stripped.push({ ...w, word: trimmed });
+            // Check for trailing opener (e.g. "days (") and split it
+            const splitMatch = trimmed.match(/^(.*?)(\s*)([\(\"\'\u201C\u2018\u00AB\<]+)$/);
+            if (splitMatch && splitMatch[1].trim().length > 0) {
+                const wordPart = splitMatch[1].trim();
+                const spacePart = splitMatch[2];
+                const openerPart = splitMatch[3];
+                
+                // Only split if there is space OR if the opener is unambiguous (brackets)
+                // We treat quotes as ambiguous - they stick to the word if no space (e.g. end")
+                const isAmbiguous = /^[\"\'\u201C\u2018]+$/.test(openerPart);
+                
+                if (isAmbiguous && spacePart.length === 0) {
+                     stripped.push({ ...w, word: trimmed });
+                } else {
+                    // Split duration: give most to word, last 0.1s to opener
+                    const splitTime = Math.max(w.start_s, w.end_s - 0.1);
+                    
+                    stripped.push({ ...w, word: wordPart, end_s: splitTime });
+                    stripped.push({ ...w, word: openerPart, start_s: splitTime });
+                }
+            } else {
+                stripped.push({ ...w, word: trimmed });
+            }
         }
     }
 
@@ -55,7 +76,8 @@ export const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
         // A. Forward Merge (Openers)
         if (isOpener(current.word) && i + 1 < stripped.length) {
             const next = stripped[i+1];
-            if (next.start_s - current.end_s < 1.5) {
+            // Increased threshold to 5.0s to ensure brackets always join the next word
+            if (next.start_s - current.end_s < 5.0) {
                 stripped[i+1] = {
                     ...next,
                     word: current.word + next.word,
@@ -170,17 +192,10 @@ export const matchWordsToPrompt = (aligned: AlignedWord[], promptText: string): 
                      }
                      
                      if (nextLineIndex > currentLineIndex) {
-                         // Decide affinity based on timing
-                         const prevEnd = currentGroup.length > 0 ? currentGroup[currentGroup.length - 1].end_s : 0;
-                         const distToPrev = currentGroup.length > 0 ? (wordObj.start_s - prevEnd) : 999;
-                         const distToNext = nextObj.start_s - wordObj.end_s;
-                         
-                         // If closer to next word, or isolated from previous, switch lines now.
-                         if (distToNext < distToPrev || distToPrev > 1.0) {
-                              if (currentGroup.length > 0) groups.push(currentGroup);
-                              currentGroup = [];
-                              currentLineIndex = nextLineIndex;
-                         }
+                         // Force switch for openers if next word is on a new line
+                         if (currentGroup.length > 0) groups.push(currentGroup);
+                         currentGroup = [];
+                         currentLineIndex = nextLineIndex;
                      }
                 }
             }

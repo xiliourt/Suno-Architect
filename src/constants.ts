@@ -1,4 +1,3 @@
-
 import { SunoLibrary, LyricalConstraints } from "./types";
 
 export const SUNO_MODEL_MAPPINGS = [
@@ -24,9 +23,12 @@ export const DEFAULT_LYRICAL_CONSTRAINTS: LyricalConstraints = {
   forbiddenRhymes: "fire/desire, heart/apart/start, night/light/fight/sight, pain/rain/vain, soul/whole/control, time/mind/blind, stay/away/day, breath/death, eyes/lies/skies, burn/turn/learn, fall/all/wall, tears/fears/years"
 };
 
+
 export const ASPECT_RATIOS = {
   "16:9": { width: 1280, height: 720, label: "Landscape (16:9)" },
+  "16:9 (FHD)": { width: 1920, height: 1080, label: "Landscape FHD (1920x1080)" },
   "9:16": { width: 720, height: 1280, label: "Portrait/TikTok (9:16)" },
+  "9:16 (FHD)": { width: 1080, height: 1920, label: "Portrait FHD (1080x1920)" },
   "1:1": { width: 1080, height: 1080, label: "Square (1:1)" },
   "4:3": { width: 1024, height: 768, label: "Classic (4:3)" }
 };
@@ -34,8 +36,7 @@ export const ASPECT_RATIOS = {
 export const AUDIO_BITRATES = [
     { label: "128 kbps (Standard)", value: 128000 },
     { label: "192 kbps (High)", value: 192000 },
-    { label: "256 kbps (Very High)", value: 256000 },
-    { label: "320 kbps (Master)", value: 320000 },
+    { label: "Max (pcm)", value: 1000000 },
 ];
 
 export const VISUALIZER_FONTS = [

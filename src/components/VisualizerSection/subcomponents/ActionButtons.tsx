@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { AUDIO_BITRATES } from '../../../constants';
 
@@ -6,6 +7,7 @@ interface ActionButtonsProps {
   setAudioBitrate: (val: number) => void;
   isRendering: boolean;
   renderProgress: number;
+  renderSpeed: number;
   onStartRender: () => void;
   isPreparing: boolean;
   hasAlignment: boolean;
@@ -16,6 +18,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
   setAudioBitrate,
   isRendering,
   renderProgress,
+  renderSpeed,
   onStartRender,
   isPreparing,
   hasAlignment
@@ -48,7 +51,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
           {isRendering ? (
               <>
                 <span className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></span>
-                Rendering {Math.round(renderProgress)}%
+                Rendering {Math.round(renderProgress)}% ({renderSpeed.toFixed(2)}x)
               </>
           ) : (
               <>
