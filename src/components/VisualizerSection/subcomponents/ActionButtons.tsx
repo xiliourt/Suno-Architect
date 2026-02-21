@@ -1,10 +1,11 @@
-
 import React from 'react';
 import { AUDIO_BITRATES } from '../../../constants';
 
 interface ActionButtonsProps {
   audioBitrate: number;
   setAudioBitrate: (val: number) => void;
+  fps: number;
+  setFps: (val: number) => void;
   isRendering: boolean;
   renderProgress: number;
   renderSpeed: number;
@@ -16,6 +17,8 @@ interface ActionButtonsProps {
 const ActionButtons: React.FC<ActionButtonsProps> = ({
   audioBitrate,
   setAudioBitrate,
+  fps,
+  setFps,
   isRendering,
   renderProgress,
   renderSpeed,
@@ -25,17 +28,30 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
 }) => {
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-          <label className="text-xs text-slate-500">Audio Quality</label>
-          <select 
-            value={audioBitrate}
-            onChange={(e) => setAudioBitrate(Number(e.target.value))}
-            className="bg-slate-900 border border-slate-700 rounded text-xs text-white p-1 focus:ring-1 focus:ring-purple-500"
-          >
-              {AUDIO_BITRATES.map(b => (
-                  <option key={b.value} value={b.value}>{b.label}</option>
-              ))}
-          </select>
+      <div className="flex items-center justify-between gap-2">
+          <div className="flex-1">
+            <label className="text-[10px] text-slate-500 block mb-1">Audio Quality</label>
+            <select 
+                value={audioBitrate}
+                onChange={(e) => setAudioBitrate(Number(e.target.value))}
+                className="w-full bg-slate-900 border border-slate-700 rounded text-xs text-white p-1.5 focus:ring-1 focus:ring-purple-500"
+            >
+                {AUDIO_BITRATES.map(b => (
+                    <option key={b.value} value={b.value}>{b.label}</option>
+                ))}
+            </select>
+          </div>
+          <div className="w-24">
+            <label className="text-[10px] text-slate-500 block mb-1">Frame Rate</label>
+            <select 
+                value={fps}
+                onChange={(e) => setFps(Number(e.target.value))}
+                className="w-full bg-slate-900 border border-slate-700 rounded text-xs text-white p-1.5 focus:ring-1 focus:ring-purple-500"
+            >
+                <option value="30">30 FPS</option>
+                <option value="60">60 FPS</option>
+            </select>
+          </div>
       </div>
       <button
         onClick={onStartRender}
