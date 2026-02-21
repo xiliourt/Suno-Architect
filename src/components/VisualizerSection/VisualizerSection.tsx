@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { SunoClip } from '../../types';
 import VisualizerHeader from './VisualizerHeader';
@@ -88,6 +87,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                      <ActionButtons 
                         audioBitrate={state.audioBitrate}
                         setAudioBitrate={setters.setAudioBitrate}
+                        fps={state.fps}
+                        setFps={setters.setFps}
                         isRendering={state.isRendering}
                         renderProgress={state.renderProgress}
                         renderSpeed={state.renderSpeed}
@@ -118,6 +119,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                         qt6Sensitivity={state.qt6Sensitivity} setQt6Sensitivity={setters.setQt6Sensitivity}
                         videoBitrate={state.videoBitrate} setVideoBitrate={setters.setVideoBitrate}
                         videoBitrateMode={state.videoBitrateMode} setVideoBitrateMode={setters.setVideoBitrateMode}
+                        fps={state.fps} setFps={setters.setFps}
                         onReset={() => {
                             setters.setActiveColor('#e879f9');
                             setters.setInactiveColor('#ffffff');
@@ -130,6 +132,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                             setters.setQt6Sensitivity(1.0);
                             setters.setVideoBitrate(5000000);
                             setters.setVideoBitrateMode('variable');
+                            setters.setFps(30);
                         }}
                      />
 
