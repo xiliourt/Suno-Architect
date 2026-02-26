@@ -23,7 +23,7 @@ export const useVisualizer = (
     const [visualMode, setVisualMode] = useState<'cover' | 'qt6'>('cover');
     const [customBg, setCustomBg] = useState<{ url: string, type: 'image' | 'video', name: string } | null>(null);
     const [customAudio, setCustomAudio] = useState<{ url: string, name: string } | null>(null);
-    const [audioBitrate, setAudioBitrate] = useState(192000);
+    const [audioBitrate, setAudioBitrate] = useState(320000);
     const [videoBitrate, setVideoBitrate] = useState(5000000);
     const [videoBitrateMode, setVideoBitrateMode] = useState<'constant' | 'variable'>('variable');
     const [imgSrc, setImgSrc] = useState<string>('');
@@ -45,6 +45,25 @@ export const useVisualizer = (
     const [fontFamily, setFontFamily] = useState('Inter, sans-serif');
     const [smoothingFactor, setSmoothingFactor] = useState(0.1); 
     const [verticalOffset, setVerticalOffset] = useState(0); 
+    
+    // Color Events State
+    const [colorEvents, setColorEvents] = useState<any[]>([]);
+
+    const addColorEvent = (event: any) => {
+        setColorEvents(prev => [...prev, event].sort((a: any, b: any) => a.time - b.time));
+    };
+
+    const removeColorEvent = (index: number) => {
+        setColorEvents(prev => prev.filter((_, i) => i !== index));
+    };
+
+    const updateColorEvent = (index: number, updatedEvent: any) => {
+        setColorEvents(prev => {
+            const newEvents = [...prev];
+            newEvents[index] = updatedEvent;
+            return newEvents.sort((a: any, b: any) => a.time - b.time);
+        });
+    }; 
 
     // Qt6 Specific Settings
     const [qt6Style, setQt6Style] = useState<Qt6Style>('wave');
@@ -312,6 +331,14 @@ export const useVisualizer = (
 
     // --- DRAWING LOGIC ---
     const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number, data?: Uint8Array | Float32Array) => {
+        // Determine current colors based on time for background/visualizer
+        let currentActiveColor = activeColor;
+        // Find the last event that happened before or at current time
+        const activeEvent = [...colorEvents].reverse().find((e: any) => e.time <= time);
+        if (activeEvent) {
+            currentActiveColor = activeEvent.activeColor;
+        }
+
         // 1. Background Layer
         ctx.fillStyle = '#1e1e1e';
         ctx.fillRect(0, 0, width, height);
@@ -349,15 +376,15 @@ export const useVisualizer = (
 
             // Render Visualizer
             if (data) {
-                drawQt6Visualizer(ctx, width, height, data, qt6Style, { activeColor, qt6Sensitivity, qt6BarCount });
+                drawQt6Visualizer(ctx, width, height, data, qt6Style, { activeColor: currentActiveColor, qt6Sensitivity, qt6BarCount });
             } else if (analyserRef.current && dataArrayRef.current) {
                 // Realtime extraction
                 if (qt6Style === 'wave') {
                     analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
-                    drawQt6Visualizer(ctx, width, height, dataArrayRef.current, 'wave', { activeColor, qt6Sensitivity, qt6BarCount });
+                    drawQt6Visualizer(ctx, width, height, dataArrayRef.current, 'wave', { activeColor: currentActiveColor, qt6Sensitivity, qt6BarCount });
                 } else {
                     analyserRef.current.getByteFrequencyData(dataArrayRef.current);
-                    drawQt6Visualizer(ctx, width, height, dataArrayRef.current, qt6Style, { activeColor, qt6Sensitivity, qt6BarCount });
+                    drawQt6Visualizer(ctx, width, height, dataArrayRef.current, qt6Style, { activeColor: currentActiveColor, qt6Sensitivity, qt6BarCount });
                 }
             }
         }
@@ -370,13 +397,14 @@ export const useVisualizer = (
             inactiveOpacity,
             smoothingFactor,
             verticalOffset,
-            aspectRatio
+            aspectRatio,
+            colorEvents
         });
 
         // Title & Progress Bar
         if (clipData && duration) {
             const pct = time / duration;
-            ctx.fillStyle = activeColor;
+            ctx.fillStyle = currentActiveColor;
             ctx.fillRect(0, height - 8, width * pct, 8);
         }
     };
@@ -397,7 +425,7 @@ export const useVisualizer = (
             setProgress(audioRef.current.currentTime);
             requestRef.current = requestAnimationFrame(animate);
         }
-    }, [isRendering, customBg, aspectRatio, clipData, duration, activeColor, inactiveColor, inactiveOpacity, fontFamily, smoothingFactor, verticalOffset, qt6Style, qt6BarCount, qt6Sensitivity, visualMode, lines]);
+    }, [isRendering, customBg, aspectRatio, clipData, duration, activeColor, inactiveColor, inactiveOpacity, fontFamily, smoothingFactor, verticalOffset, qt6Style, qt6BarCount, qt6Sensitivity, visualMode, lines, colorEvents]);
 
     useEffect(() => {
         if (selectedClipId && !isRendering) {
@@ -475,13 +503,15 @@ export const useVisualizer = (
             audioBitrate, videoBitrate, videoBitrateMode, imgSrc, activeColor, inactiveColor, inactiveOpacity, fontFamily,
             smoothingFactor, verticalOffset, qt6Style, qt6BarCount, qt6Sensitivity,
             clipData, alignment, lines, lyricSource, applyStatus,
-            isRendering, renderProgress, renderSpeed, isPreparing, isGrouping, progress, duration, isPlaying
+            isRendering, renderProgress, renderSpeed, isPreparing, isGrouping, progress, duration, isPlaying,
+            colorEvents
         },
         setters: {
             setSelectedClipId, setManualId, setAspectRatio, setVisualMode, setCustomBg, setCustomAudio,
             setAudioBitrate, setVideoBitrate, setVideoBitrateMode, setImgSrc, setActiveColor, setInactiveColor, setInactiveOpacity, setFontFamily,
             setSmoothingFactor, setVerticalOffset, setQt6Style, setQt6BarCount, setQt6Sensitivity,
-            setLyricSource, setIsPlaying
+            setLyricSource, setIsPlaying,
+            addColorEvent, removeColorEvent, updateColorEvent
         },
         refs: {
             canvasRef, audioRef, customVideoRef

@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { SunoClip } from '../../types';
 import VisualizerHeader from './VisualizerHeader';
@@ -12,6 +13,7 @@ import AiControlsCard from './subcomponents/AiControlsCard';
 import ActionButtons from './subcomponents/ActionButtons';
 import CanvasPreview from './subcomponents/CanvasPreview';
 import PlaybackControls from './subcomponents/PlaybackControls';
+import ColorEventsManager from './subcomponents/ColorEventsManager';
 
 interface VisualizerSectionProps {
   history: SunoClip[];
@@ -134,6 +136,16 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                             setters.setVideoBitrateMode('variable');
                             setters.setFps(30);
                         }}
+                     />
+
+                     <ColorEventsManager 
+                        colorEvents={state.colorEvents}
+                        onAddEvent={setters.addColorEvent}
+                        onRemoveEvent={setters.removeColorEvent}
+                        onUpdateEvent={setters.updateColorEvent}
+                        currentTime={state.progress}
+                        activeColor={state.activeColor}
+                        inactiveColor={state.inactiveColor}
                      />
 
                      <PlaybackControls 

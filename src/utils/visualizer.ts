@@ -273,6 +273,7 @@ export const drawScrollingLyrics = (
         smoothingFactor: number;
         verticalOffset: number;
         aspectRatio: string;
+        colorEvents?: any[];
     }
 ) => {
     if (lines.length === 0) return;
@@ -417,20 +418,33 @@ export const drawScrollingLyrics = (
                 const isWordPast = time > w.end_s;
                 const isLineActive = item.index === activeLineIdx;
 
+                // Determine colors for this word
+                let wordActiveColor = settings.activeColor;
+                let wordInactiveColor = settings.inactiveColor;
+                
+                if (settings.colorEvents && settings.colorEvents.length > 0) {
+                    // Find the last event that happened before or at this word's start time
+                    const evt = [...settings.colorEvents].reverse().find((e: any) => e.time <= w.start_s);
+                    if (evt) {
+                        wordActiveColor = evt.activeColor;
+                        wordInactiveColor = evt.inactiveColor;
+                    }
+                }
+
                 if (isLineActive) {
                     if (isWordActive) {
-                        ctx.fillStyle = settings.activeColor;
-                        ctx.shadowColor = settings.activeColor; 
+                        ctx.fillStyle = wordActiveColor;
+                        ctx.shadowColor = wordActiveColor; 
                         ctx.shadowBlur = 25;
                     } else if (isWordPast) {
-                        ctx.fillStyle = hexToRgba(settings.inactiveColor, 0.9);
+                        ctx.fillStyle = hexToRgba(wordInactiveColor, 0.9);
                         ctx.shadowBlur = 0;
                     } else {
-                        ctx.fillStyle = hexToRgba(settings.inactiveColor, settings.inactiveOpacity);
+                        ctx.fillStyle = hexToRgba(wordInactiveColor, settings.inactiveOpacity);
                         ctx.shadowBlur = 0;
                     }
                 } else {
-                    ctx.fillStyle = hexToRgba(settings.inactiveColor, item.opacity * settings.inactiveOpacity);
+                    ctx.fillStyle = hexToRgba(wordInactiveColor, item.opacity * settings.inactiveOpacity);
                     ctx.shadowBlur = 0;
                 }
 

@@ -1,5 +1,11 @@
 
 
+export interface ColorEvent {
+  time: number;
+  activeColor: string;
+  inactiveColor: string;
+}
+
 export interface ParsedSunoOutput {
   style: string;
   title: string;
