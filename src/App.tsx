@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import InputSection from './components/InputSection/InputSection';
 import OutputSection from './components/OutputSection/OutputSection';
@@ -150,7 +149,15 @@ const App: React.FC = () => {
                     map.set(newClip.id, {
                         ...newClip,
                         originalData: isRich ? existing.originalData : newClip.originalData,
-                        metadata: isRich ? existing.metadata : newClip.metadata,
+                        metadata: {
+                            ...(isRich ? existing.metadata : newClip.metadata),
+                            // Always prefer new metadata for these fields if they are present in the fresh fetch
+                            avg_bpm: newClip.metadata.avg_bpm || existing.metadata.avg_bpm,
+                            key: newClip.metadata.key || existing.metadata.key,
+                            duration: newClip.metadata.duration || existing.metadata.duration,
+                            max_bpm: newClip.metadata.max_bpm || existing.metadata.max_bpm,
+                            min_bpm: newClip.metadata.min_bpm || existing.metadata.min_bpm,
+                        },
                         alignmentData: existing.alignmentData || newClip.alignmentData,
                         lrcContent: existing.lrcContent || newClip.lrcContent,
                         srtContent: existing.srtContent || newClip.srtContent,
@@ -282,7 +289,7 @@ const App: React.FC = () => {
             originalData: originalData
         }));
         
-        setHistory(prevHistory => [...newClips, ...prevHistory]);
+        mergeClips(newClips);
     }
   };
 
