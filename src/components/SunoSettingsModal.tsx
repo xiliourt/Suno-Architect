@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import CopyButton from './CopyButton';
 import { getSunoCredits } from '../services/sunoApi';
-import { SUNO_MODEL_MAPPINGS, buildKnowledgeBase, GET_PROMPT_V1, GET_PROMPT_V2, GET_PROMPT_V3, DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS } from '../constants';
+import { SUNO_MODEL_MAPPINGS, buildKnowledgeBase, GET_PROMPT_V1, GET_PROMPT_V2, GET_PROMPT_V3, GET_PROMPT_V4, DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS } from '../constants';
 import { PromptSettings, SunoLibrary, LyricalConstraints } from '../types';
 
 interface SunoSettingsModalProps {
@@ -91,7 +90,7 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
   }, [isModelDropdownOpen]);
 
   // Handle version switching to auto-fill custom prompt if switching to a preset
-  const handleVersionChange = (newVersion: 'v1' | 'v2' | 'v3' | 'custom') => {
+  const handleVersionChange = (newVersion: 'v1' | 'v2' | 'v3' | 'v4' | 'custom') => {
       let newText = promptSettings.customSystemPrompt;
       
       const currentLib: SunoLibrary = {
@@ -117,6 +116,8 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
           newText = GET_PROMPT_V2(kb, currentConstraints);
       } else if (newVersion === 'v3') {
           newText = GET_PROMPT_V3();
+      } else if (newVersion === 'v4') {
+          newText = GET_PROMPT_V4();
       }
       
       setPromptSettings(prev => ({
@@ -161,7 +162,7 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
     };
     
     // If we are in V1 or V2 mode, regenerate the prompt text based on the NEW library/constraints before saving.
-    // If V3, regenerate using static.
+    // If V3 or V4, regenerate using static.
     let finalSystemPrompt = promptSettings.customSystemPrompt;
     if (promptSettings.version !== 'custom') {
         const kb = buildKnowledgeBase(updatedLibrary);
@@ -171,6 +172,8 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
             finalSystemPrompt = GET_PROMPT_V2(kb, updatedConstraints);
         } else if (promptSettings.version === 'v3') {
             finalSystemPrompt = GET_PROMPT_V3();
+        } else if (promptSettings.version === 'v4') {
+            finalSystemPrompt = GET_PROMPT_V4();
         }
     }
 
@@ -370,20 +373,20 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
                              <p className="text-xs text-slate-400">Select which instruction set the AI uses.</p>
                          </div>
                          <div className="flex bg-slate-900 p-1 rounded-lg">
-                             {(['v1', 'v2', 'v3', 'custom'] as const).map(v => (
+                             {(['v1', 'v2', 'v3', 'v4', 'custom'] as const).map(v => (
                                  <button
                                     key={v}
                                     onClick={() => handleVersionChange(v)}
                                     className={`px-4 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${promptSettings.version === v ? 'bg-purple-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
                                  >
-                                     {v === 'v2' ? 'V2 (Lyrical)' : v === 'v1' ? 'V1 (Classic)' : v === 'v3' ? 'V3 (Detailed)' : 'Custom'}
+                                     {v === 'v2' ? 'V2 (Lyrical)' : v === 'v1' ? 'V1 (Classic)' : v === 'v3' ? 'V3 (Detailed)' : v === 'v4' ? 'V4 (Advanced)' : 'Custom'}
                                  </button>
                              ))}
                          </div>
                     </div>
 
-                    {/* 2 & 3. Library & Constraints (Hidden if V3) */}
-                    {promptSettings.version !== 'v3' && (
+                    {/* 2 & 3. Library & Constraints (Hidden if V3 or V4) */}
+                    {promptSettings.version !== 'v3' && promptSettings.version !== 'v4' && (
                         <>
                             <div className={`grid grid-cols-1 ${promptSettings.version !== 'v1' ? 'lg:grid-cols-2' : ''} gap-8`}>
                                 {/* Library Configuration */}
@@ -435,6 +438,22 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
                                 V3 uses a comprehensive, static knowledge base covering advanced parameters, extensive genre lists, and specific prompting strategies. 
                                 Library customisation is disabled in this mode to ensure prompt consistency with the knowledge base.
                             </p>
+                        </div>
+                    )}
+
+                    {/* Information Box for V4 */}
+                    {promptSettings.version === 'v4' && (
+                         <div className="p-4 bg-emerald-900/20 border border-emerald-500/20 rounded-xl">
+                            <h4 className="text-xs font-bold text-emerald-300 mb-2">Extended Knowledge Base Active</h4>
+                            <div className="text-xs text-slate-400 leading-relaxed space-y-2">
+                                <p>
+                                    V4 uses an alternative, comprehensive, static knowledge base covering advanced parameters and alternative structuring of available parameters. Library customisation is disabled in this mode to ensure prompt consistency with the knowledge base.
+                                </p>
+                                <div className="pt-2 border-t border-emerald-500/10">
+                                    <p>Version: 2025-12-02 (distilled from tag-reference_20251120-02.md)</p>
+                                    <p>Source: <a href="https://github.com/stayen/suno-reference/" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">https://github.com/stayen/suno-reference/</a></p>
+                                </div>
+                            </div>
                         </div>
                     )}
 
