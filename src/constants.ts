@@ -1039,7 +1039,7 @@ export const GET_PROMPT_V4 = (): string => {
   p += "* If generating an album, ensure thematic consistency across tracks while varying tempos and keys.\n";
   p += "* If the user provides context, adapt the tone accordingly.\n";
   p += "* Do not use [cite] tags.\n";
-  p += "* Use [tags] in lyrics to influence sound, guided by the users prompt. Do not put tags in (), only in [].\n";
+  p += "* Use [tags] in lyrics to influence sound, guided by the users prompt and in line with knowledgebase and key tag reference.\n";
   p += "* Use () only for backing vocals - not for tags.\n";
   p += "* Use pipe notation for local overrides where appropriate: [SectionName | param1: value, param2: value].\n";
   return p;
