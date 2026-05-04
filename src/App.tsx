@@ -7,7 +7,8 @@ import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings, ViewMode, 
 import { DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS, buildKnowledgeBase, GET_PROMPT_V1 } from './constants';
 import Footer from './components/Footer';
 import SunoSettingsModal from './components/SunoSettingsModal';
-import { getSunoCredits, updateSunoMetadata, getSunoFeed } from './services/sunoApi';
+import { getSunoCredits, getSunoFeed } from './services/sunoApi';
+import { updateSunoMetadata } from './services/sunoGenApi';
 import HistorySection from './components/HistorySection/HistorySection';
 import VisualizerSection from './components/VisualizerSection/VisualizerSection';
 import { stripMetaTags } from './utils/lyrics';
