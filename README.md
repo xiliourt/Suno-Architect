@@ -23,8 +23,8 @@
  
 ### LRC and SRT File Generation
 - Pulls JSON word-by-word lyrics from Suno API
-- Pulls lyics from Suno API
-- Times word-time lyrics line-by-line, exportable as SRT or LRC
+- Pulls lyrics from Suno API
+- Times word-timed lyrics line-by-line based on original prompt / listed lyrics, exportable as SRT or LRC
 
 ### Lyric Video Generation
 - Pulls JSON word-by-word lyrics from Suno API for highlighting active word
