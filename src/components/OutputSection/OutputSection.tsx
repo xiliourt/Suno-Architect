@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ParsedSunoOutput } from '../../types';
-import { triggerSunoGeneration } from '../../services/sunoApi';
+import { triggerSunoGeneration } from '../../services/sunoGenApi';
 import EditSongModal from '../EditSongModal';
 import AlbumHeader from './AlbumHeader';
 import TrackCard from './TrackCard';
