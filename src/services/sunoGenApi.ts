@@ -91,7 +91,7 @@ export const updateSunoMetadata = async (clipId: string, data: ParsedSunoOutput,
     if (!cookie) throw new Error("No cookie provided");
 
     // Point to the metadata proxy
-    const PROXY_ENDPOINT = `https://studio-api.prod.suno.com/api/gen/${clipId}/set_metadata/`;
+    const PROXY_ENDPOINT = `/api/gen/${clipId}/set_metadata/`;
     
     // Construct payload
     const payload = {
