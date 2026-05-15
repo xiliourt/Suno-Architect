@@ -5,7 +5,7 @@ export const getSunoCredits = async (cookie: string): Promise<number> => {
     if (!cookie) throw new Error("No cookie provided");
     
     // Direct Suno billing endpoint
-    const BILLING_ENDPOINT = "https://studio-api.prod.suno.com/api/billing/info/";
+    const BILLING_ENDPOINT = "/api/billing/info/";
     
     try {
         const headers: Record<string, string> = {
@@ -41,7 +41,7 @@ export const getSunoFeed = async (
 ): Promise<any> => {
     if (!cookie) throw new Error("No cookie provided");
 
-    const FEED_ENDPOINT = `https://studio-api.prod.suno.com/api/feed/v3`;
+    const FEED_ENDPOINT = `/api/feed/v3`;
 
     try {
         const headers: Record<string, string> = {
@@ -91,7 +91,7 @@ export const getSunoFeed = async (
 export const getLyricAlignment = async (songId: string, cookie: string): Promise<LyricAlignmentResponse> => {
     if (!cookie) throw new Error("No cookie provided");
 
-    const ENDPOINT = `https://studio-api.prod.suno.com/api/gen/${songId}/aligned_lyrics/v2`;
+    const ENDPOINT = `/api/gen/${songId}/aligned_lyrics/v2`;
 
     try {
         const headers: Record<string, string> = {
@@ -121,7 +121,7 @@ export const getLyricAlignment = async (songId: string, cookie: string): Promise
 export const getSunoClip = async (clipId: string, cookie: string): Promise<any> => {
     if (!cookie) throw new Error("No cookie provided");
 
-    const ENDPOINT = `https://studio-api.prod.suno.com/api/clip/${clipId}`;
+    const ENDPOINT = `/api/clip/${clipId}`;
 
     try {
         const headers: Record<string, string> = {
